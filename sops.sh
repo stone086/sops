@@ -202,21 +202,11 @@ system_update() {
   echo "将执行更新命令："
   echo "$cmd"
   echo "------------------------"
-  read -r -p "确认执行更新？(y/N): " yn
-  case "${yn}" in
-    y|Y)
-      echo "开始更新..."
-      bash -lc "$cmd"
-      echo "更新完成。"
-      pause
-      return
-      ;;
-    *)
-      echo "已取消更新。"
-      pause
-      return
-      ;;
-  esac
+  echo "开始更新..."
+  bash -lc "$cmd"
+  echo "更新完成。"
+  pause
+  return
 }
 
 system_cleanup() {
