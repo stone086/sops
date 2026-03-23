@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-sh_v="0.1.1"
+sh_v="0.1.2"
 
 cyan='\033[96m'
 green='\033[32m'
+yellow='\033[33m'
 white='\033[0m'
 
 pause() {
@@ -17,6 +18,15 @@ show_header() {
   clear
   echo -e "${cyan}SOPS Script Toolbox v${sh_v}${white}"
   echo "------------------------"
+}
+
+require_root() {
+  if [ "${EUID:-$(id -u)}" -ne 0 ]; then
+    echo "该功能需要 root 权限。"
+    pause
+    return 1
+  fi
+  return 0
 }
 
 to_human() {
@@ -67,13 +77,13 @@ system_query() {
   echo "系统信息查询"
   echo "-------------"
 
-  local hostname os_pretty kernel
-  hostname="$(hostname)"
+  local host os_pretty kernel
+  host="$(hostname)"
   os_pretty="$(grep '^PRETTY_NAME=' /etc/os-release 2>/dev/null | cut -d= -f2- | tr -d '"' || true)"
   [ -z "$os_pretty" ] && os_pretty="Unknown"
   kernel="$(uname -r)"
 
-  echo "主机名：        ${hostname}"
+  echo "主机名：        ${host}"
   echo "系统版本：      ${os_pretty}"
   echo "Linux版本：     ${kernel}"
   echo "-------------"
@@ -157,17 +167,111 @@ system_query() {
   pause
 }
 
+detect_update_cmd() {
+  if command -v apt-get >/dev/null 2>&1; then
+    echo "apt-get update && apt-get -y upgrade"
+  elif command -v dnf >/dev/null 2>&1; then
+    echo "dnf -y upgrade --refresh"
+  elif command -v yum >/dev/null 2>&1; then
+    echo "yum -y update"
+  elif command -v zypper >/dev/null 2>&1; then
+    echo "zypper --non-interactive refresh && zypper --non-interactive update"
+  elif command -v pacman >/dev/null 2>&1; then
+    echo "pacman -Syu --noconfirm"
+  elif command -v apk >/dev/null 2>&1; then
+    echo "apk update && apk upgrade"
+  else
+    echo ""
+  fi
+}
+
+system_update() {
+  require_root || return
+  show_header
+  echo "系统更新"
+  echo "------------------------"
+
+  local cmd
+  cmd="$(detect_update_cmd)"
+  if [ -z "$cmd" ]; then
+    echo "未识别到受支持的包管理器，无法自动更新。"
+    pause
+    return
+  fi
+
+  echo "将执行更新命令："
+  echo "$cmd"
+  echo "------------------------"
+  read -r -p "确认执行更新？(y/N): " yn
+  case "${yn}" in
+    y|Y)
+      echo "开始更新..."
+      bash -lc "$cmd"
+      echo "更新完成。"
+      pause
+      return
+      ;;
+    *)
+      echo "已取消更新。"
+      pause
+      return
+      ;;
+  esac
+}
+
+system_cleanup() {
+  require_root || return
+  show_header
+  echo "系统清理"
+  echo "------------------------"
+  echo "将执行：缓存清理、无用依赖清理、日志/临时文件清理（安全版）"
+  read -r -p "确认执行清理？(y/N): " yn
+  case "${yn}" in
+    y|Y) ;;
+    *) echo "已取消清理。"; pause; return ;;
+  esac
+
+  if command -v apt-get >/dev/null 2>&1; then
+    apt-get -y autoremove --purge || true
+    apt-get -y autoclean || true
+    apt-get -y clean || true
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf -y autoremove || true
+    dnf -y clean all || true
+  elif command -v yum >/dev/null 2>&1; then
+    yum -y autoremove || true
+    yum -y clean all || true
+  elif command -v zypper >/dev/null 2>&1; then
+    zypper --non-interactive clean --all || true
+  elif command -v pacman >/dev/null 2>&1; then
+    pacman -Sc --noconfirm || true
+  elif command -v apk >/dev/null 2>&1; then
+    apk cache clean || true
+  fi
+
+  journalctl --vacuum-time=7d >/dev/null 2>&1 || true
+  find /tmp -mindepth 1 -mtime +3 -exec rm -rf {} + 2>/dev/null || true
+  find /var/tmp -mindepth 1 -mtime +3 -exec rm -rf {} + 2>/dev/null || true
+
+  echo "系统清理完成。"
+  pause
+}
+
 system_operations_menu() {
   while true; do
     show_header
     echo "系统操作"
     echo "------------------------"
     echo "1. 系统查询"
+    echo "2. 系统更新"
+    echo "3. 系统清理"
     echo "0. 返回主菜单"
     echo "------------------------"
     read -r -p "请输入你的选择： " sub_choice
     case "${sub_choice}" in
       1) system_query ;;
+      2) system_update ;;
+      3) system_cleanup ;;
       0) return ;;
       *) echo "无效选择"; pause ;;
     esac
