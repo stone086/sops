@@ -36,18 +36,18 @@ status_mark() {
   IFS='|' read -r -a _cmds <<< "$spec"
   for cmd in "${_cmds[@]}"; do
     if command -v "$cmd" >/dev/null 2>&1; then
-      printf "${bold}${green}鉁?{white}"
+      printf "${bold}${green}閴?{white}"
       return 0
     fi
   done
-  printf "${bold}${red}鉁?{white}"
+  printf "${bold}${red}閴?{white}"
 }
 
 basic_star() {
   local code="$1"
   case "$code" in
     101|104|106|201|301|303|401|501|601|801|804|807)
-      printf " ${yellow}鈽?{white}"
+      printf " ${yellow}閳?{white}"
       ;;
     *)
       printf ""
@@ -1776,7 +1776,7 @@ system_operations_menu() {
     echo " 9. Install Python Version            10. Open All Ports"
     echo "------------------------"
     echo "11. Change SSH Port                   12. Optimize DNS"
-    echo "13. Reinstall OS 鈽?                   14. Disable Root + New User"
+    echo "13. Reinstall OS 閳?                   14. Disable Root + New User"
     echo "15. Prefer IPv4/IPv6                 16. Resize Swap"
     echo "17. User Management                   18. User/Password Generator"
     echo "19. Timezone Settings                 20. Enable BBR3"
@@ -1787,17 +1787,17 @@ system_operations_menu() {
     echo "27. Traffic-limit Auto Shutdown       28. Key Login Mode"
     echo "29. TG-bot Monitoring                 30. OpenSSH CVE Fix"
     echo "------------------------"
-    echo "31. RHEL Kernel Upgrade               32. Kernel Parameter Optimize 鈽?
-    echo "33. Virus Scanner 鈽?                  34. File Manager"
-    echo "35. Switch System Language            36. CLI Beautifier 鈽?
+    echo "31. RHEL Kernel Upgrade               32. Kernel Parameter Optimize *"
+    echo "33. Virus Scanner *                   34. File Manager"
+    echo "35. Switch System Language            36. CLI Beautifier *"
     echo "37. Recycle Bin                       38. Backup & Restore"
     echo "39. SSH Remote Tool                   40. Disk Partition Tool"
     echo "------------------------"
     echo "41. Command History                   42. Rsync Remote Sync"
-    echo "43. Command Favorites 鈽?              44. NIC Manager"
-    echo "45. System Log Manager 鈽?             46. Env Variable Manager"
-    echo "47. One-click Full Tuning 鈽?          48. Privacy & Security"
-    echo "49. s Command Advanced Usage 鈽?
+    echo "43. Command Favorites *               44. NIC Manager"
+    echo "45. System Log Manager *              46. Env Variable Manager"
+    echo "47. One-click Full Tuning *           48. Privacy & Security"
+    echo "49. s Command Advanced Usage *"
     echo "------------------------"
     echo -e "${yellow}0. RTM${white}"
     echo "------------------------"
@@ -2288,7 +2288,7 @@ workspace_menu() {
     echo " 7. Workspace-07                    8. Workspace-08"
     echo " 9. Workspace-09                    10. Workspace-10"
     echo "------------------------"
-    echo "21. SSH Resident Mode 鈽?
+    echo "21. SSH Resident Mode *"
     echo "22. Create/Enter Workspace"
     echo "23. Inject Command to Workspace"
     echo "24. Delete Workspace"
@@ -2575,7 +2575,7 @@ cluster_menu() {
     echo "------------------------"
     echo "1. Install cluster environment"
     echo "------------------------"
-    echo "2. Cluster control center 鈽?
+    echo "2. Cluster control center *"
     echo "------------------------"
     echo "7. Backup cluster environment"
     echo "8. Restore cluster environment"
