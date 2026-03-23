@@ -36,18 +36,18 @@ status_mark() {
   IFS='|' read -r -a _cmds <<< "$spec"
   for cmd in "${_cmds[@]}"; do
     if command -v "$cmd" >/dev/null 2>&1; then
-      printf "${bold}${green}閴?{white}"
+      printf "${bold}${green}OK${white}"
       return 0
     fi
   done
-  printf "${bold}${red}閴?{white}"
+  printf "${bold}${red}NO${white}"
 }
 
 basic_star() {
   local code="$1"
   case "$code" in
     101|104|106|201|301|303|401|501|601|801|804|807)
-      printf " ${yellow}閳?{white}"
+      printf " ${yellow}*${white}"
       ;;
     *)
       printf ""
@@ -1327,9 +1327,9 @@ op_switch_package_mirror() {
     apt)
       cp -f /etc/apt/sources.list "/etc/apt/sources.list.bak.$(date +%s)" 2>/dev/null || true
       if [ -f /etc/os-release ] && grep -qi ubuntu /etc/os-release; then
-        sed -i 's|http://[^ ]*archive.ubuntu.com/ubuntu/|http://archive.ubuntu.com/ubuntu/|g; s|http://[^ ]*security.ubuntu.com/ubuntu/|http://security.ubuntu.com/ubuntu/|g' /etc/apt/sources.list || true
+        sed -i 's|http://[^ ]*archive.ubuntu.com/ubuntu/|https://archive.ubuntu.com/ubuntu/|g; s|http://[^ ]*security.ubuntu.com/ubuntu/|https://security.ubuntu.com/ubuntu/|g' /etc/apt/sources.list || true
       else
-        sed -i 's|http://[^ ]*deb.debian.org/debian|http://deb.debian.org/debian|g; s|http://[^ ]*security.debian.org/debian-security|http://security.debian.org/debian-security|g' /etc/apt/sources.list || true
+        sed -i 's|http://[^ ]*deb.debian.org/debian|https://deb.debian.org/debian|g; s|http://[^ ]*security.debian.org/debian-security|https://security.debian.org/debian-security|g' /etc/apt/sources.list || true
       fi
       apt-get update || true
       ;;
@@ -1776,7 +1776,7 @@ system_operations_menu() {
     echo " 9. Install Python Version            10. Open All Ports"
     echo "------------------------"
     echo "11. Change SSH Port                   12. Optimize DNS"
-    echo "13. Reinstall OS 閳?                   14. Disable Root + New User"
+    echo "13. Reinstall OS *                   14. Disable Root + New User"
     echo "15. Prefer IPv4/IPv6                 16. Resize Swap"
     echo "17. User Management                   18. User/Password Generator"
     echo "19. Timezone Settings                 20. Enable BBR3"
@@ -2027,7 +2027,7 @@ bbr_menu() {
 
     echo "TCP Acceleration / Kernel Toolbox (SOPS)"
     echo "------------------------"
-    echo "0. Upgrade script                    9. Switch to kernel-remove mode"
+    echo "0. RTM                               9. Switch to kernel-remove mode"
     echo "10. Switch to one-click DD mode      60. Switch to IP quality/media/mail tests"
     echo "------------ Kernel Install ------------"
     echo "1. Install BBR kernel                7. Install Zen kernel"
@@ -2057,7 +2057,7 @@ bbr_menu() {
     echo "------------------------"
     read_numeric_choice bbr_choice "Please enter number: "
     case "${bbr_choice}" in
-      0) update_script ;;
+      0) return ;;
       1|2|3|5|7|8|32|33|36|37) bbr_safe_placeholder "Kernel install source not enabled in SOPS safe mode" ;;
       9) bbr_safe_placeholder "Kernel remove mode (reserved)" ;;
       10) bbr_safe_placeholder "One-click DD mode (reserved)" ;;
@@ -2167,18 +2167,298 @@ docker_install_if_needed() {
   esac
 }
 
+docker_counts_line() {
+  local c i n v
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "Docker environment not installed"
+    return
+  fi
+  c="$(docker ps -aq 2>/dev/null | wc -l | tr -d ' ')"
+  i="$(docker images -q 2>/dev/null | sort -u | wc -l | tr -d ' ')"
+  n="$(docker network ls -q 2>/dev/null | wc -l | tr -d ' ')"
+  v="$(docker volume ls -q 2>/dev/null | wc -l | tr -d ' ')"
+  echo "Docker installed  containers: ${c}  images: ${i}  networks: ${n}  volumes: ${v}"
+}
+
+docker_global_status() {
+  show_header
+  echo "Docker Global Status"
+  echo "------------------------"
+  docker_counts_line
+  echo "------------------------"
+  docker info 2>/dev/null | sed -n '1,40p' || echo "Docker not available."
+  pause
+}
+
+docker_container_manage() {
+  while true; do
+    show_header
+    echo "Docker Container Manage"
+    echo "------------------------"
+    echo "1. List containers"
+    echo "2. Start container"
+    echo "3. Stop container"
+    echo "4. Restart container"
+    echo "5. Remove container"
+    echo "6. Container logs"
+    echo "------------------------"
+    echo -e "${yellow}0. RTM${white}"
+    echo "------------------------"
+    read_numeric_choice dc "Please enter your choice: "
+    case "$dc" in
+      1) docker ps -a; pause ;;
+      2) read -r -p "Container id/name: " x; docker start "$x"; pause ;;
+      3) read -r -p "Container id/name: " x; docker stop "$x"; pause ;;
+      4) read -r -p "Container id/name: " x; docker restart "$x"; pause ;;
+      5) read -r -p "Container id/name: " x; docker rm -f "$x"; pause ;;
+      6) read -r -p "Container id/name: " x; docker logs --tail 200 "$x"; pause ;;
+      0) return ;;
+      *) echo "Invalid choice"; pause ;;
+    esac
+  done
+}
+
+docker_image_manage() {
+  while true; do
+    show_header
+    echo "Docker Image Manage"
+    echo "------------------------"
+    echo "1. List images"
+    echo "2. Pull image"
+    echo "3. Remove image"
+    echo "4. Prune dangling images"
+    echo "------------------------"
+    echo -e "${yellow}0. RTM${white}"
+    echo "------------------------"
+    read_numeric_choice di "Please enter your choice: "
+    case "$di" in
+      1) docker images; pause ;;
+      2) read -r -p "Image name:tag: " x; docker pull "$x"; pause ;;
+      3) read -r -p "Image id/name: " x; docker rmi -f "$x"; pause ;;
+      4) docker image prune -f; pause ;;
+      0) return ;;
+      *) echo "Invalid choice"; pause ;;
+    esac
+  done
+}
+
+docker_network_manage() {
+  while true; do
+    show_header
+    echo "Docker Network Manage"
+    echo "------------------------"
+    echo "1. List networks"
+    echo "2. Inspect network"
+    echo "3. Remove network"
+    echo "4. Prune unused networks"
+    echo "------------------------"
+    echo -e "${yellow}0. RTM${white}"
+    echo "------------------------"
+    read_numeric_choice dn "Please enter your choice: "
+    case "$dn" in
+      1) docker network ls; pause ;;
+      2) read -r -p "Network name: " x; docker network inspect "$x"; pause ;;
+      3) read -r -p "Network name: " x; docker network rm "$x"; pause ;;
+      4) docker network prune -f; pause ;;
+      0) return ;;
+      *) echo "Invalid choice"; pause ;;
+    esac
+  done
+}
+
+docker_volume_manage() {
+  while true; do
+    show_header
+    echo "Docker Volume Manage"
+    echo "------------------------"
+    echo "1. List volumes"
+    echo "2. Inspect volume"
+    echo "3. Remove volume"
+    echo "4. Prune unused volumes"
+    echo "------------------------"
+    echo -e "${yellow}0. RTM${white}"
+    echo "------------------------"
+    read_numeric_choice dv "Please enter your choice: "
+    case "$dv" in
+      1) docker volume ls; pause ;;
+      2) read -r -p "Volume name: " x; docker volume inspect "$x"; pause ;;
+      3) read -r -p "Volume name: " x; docker volume rm "$x"; pause ;;
+      4) docker volume prune -f; pause ;;
+      0) return ;;
+      *) echo "Invalid choice"; pause ;;
+    esac
+  done
+}
+
+docker_switch_mirror() {
+  require_root || return
+  local f="/etc/docker/daemon.json"
+  show_header
+  echo "Docker Registry Source (Official First)"
+  echo "------------------------"
+  echo "1. Use official Docker Hub (recommended)"
+  echo "2. Disable mirror (official direct)"
+  echo "3. Custom mirror URL (advanced)"
+  echo "------------------------"
+  echo -e "${yellow}0. RTM${white}"
+  echo "------------------------"
+  read_numeric_choice dm "Please enter your choice: "
+  local m=""
+  case "$dm" in
+    1) m="" ;;
+    2) m="" ;;
+    3) read -r -p "Mirror URL: " m ;;
+    0) return ;;
+    *) echo "Invalid choice"; pause; return ;;
+  esac
+  mkdir -p /etc/docker
+  if [ -z "$m" ]; then
+    cat >"$f" <<'EOF'
+{}
+EOF
+  else
+    cat >"$f" <<EOF
+{
+  "registry-mirrors": ["$m"]
+}
+EOF
+  fi
+  systemctl restart docker >/dev/null 2>&1 || true
+  echo "Docker source updated."
+  pause
+}
+
+docker_edit_daemon_json() {
+  require_root || return
+  local f="/etc/docker/daemon.json"
+  mkdir -p /etc/docker
+  touch "$f"
+  if command -v nano >/dev/null 2>&1; then
+    nano "$f"
+  elif command -v vi >/dev/null 2>&1; then
+    vi "$f"
+  else
+    echo "No editor found: $f"
+    pause
+    return
+  fi
+  systemctl restart docker >/dev/null 2>&1 || true
+  echo "docker daemon restarted."
+  pause
+}
+
+docker_set_ipv6_mode() {
+  require_root || return
+  local mode="$1"
+  local f="/etc/docker/daemon.json"
+  mkdir -p /etc/docker
+  if [ "$mode" = "on" ]; then
+    cat >"$f" <<'EOF'
+{
+  "ipv6": true,
+  "fixed-cidr-v6": "fd00:dead:beef::/48"
+}
+EOF
+    echo "Docker IPv6 enabled."
+  else
+    cat >"$f" <<'EOF'
+{
+  "ipv6": false
+}
+EOF
+    echo "Docker IPv6 disabled."
+  fi
+  systemctl restart docker >/dev/null 2>&1 || true
+  pause
+}
+
+docker_backup_restore_env() {
+  require_root || return
+  while true; do
+    show_header
+    echo "Docker Backup/Restore"
+    echo "------------------------"
+    echo "1. Backup /var/lib/docker"
+    echo "2. Restore /var/lib/docker"
+    echo "------------------------"
+    echo -e "${yellow}0. RTM${white}"
+    echo "------------------------"
+    read_numeric_choice db "Please enter your choice: "
+    case "$db" in
+      1)
+        mkdir -p /etc/sops/backups
+        local bk="/etc/sops/backups/docker-env-$(date +%Y%m%d-%H%M%S).tar.gz"
+        systemctl stop docker >/dev/null 2>&1 || true
+        tar -czf "$bk" /var/lib/docker 2>/dev/null || true
+        systemctl start docker >/dev/null 2>&1 || true
+        echo "Backup: $bk"
+        pause
+        ;;
+      2)
+        ls -lh /etc/sops/backups/docker-env-*.tar.gz 2>/dev/null || echo "No backups found."
+        read -r -p "Backup file path: " bkp
+        [ -f "$bkp" ] || { echo "Not found."; pause; continue; }
+        systemctl stop docker >/dev/null 2>&1 || true
+        tar -xzf "$bkp" -C / 2>/dev/null || true
+        systemctl start docker >/dev/null 2>&1 || true
+        echo "Restore completed."
+        pause
+        ;;
+      0) return ;;
+      *) echo "Invalid choice"; pause ;;
+    esac
+  done
+}
+
+docker_uninstall_env() {
+  require_root || return
+  show_header
+  echo "Uninstall Docker Environment"
+  echo "------------------------"
+  read_numeric_choice yn "Confirm uninstall Docker? (1=yes,0=no): "
+  [ "$yn" -eq 1 ] || { echo "Cancelled."; pause; return; }
+  local pm
+  pm="$(detect_pkg_manager)"
+  case "$pm" in
+    apt) apt-get remove -y docker.io docker-ce docker-ce-cli containerd.io || true ;;
+    dnf) dnf -y remove docker docker-ce docker-ce-cli containerd.io || true ;;
+    yum) yum -y remove docker docker-ce docker-ce-cli containerd.io || true ;;
+    zypper) zypper --non-interactive rm docker docker-ce docker-ce-cli containerd.io || true ;;
+    pacman) pacman -R --noconfirm docker || true ;;
+    apk) apk del docker docker-cli || true ;;
+  esac
+  rm -rf /var/lib/docker /etc/docker 2>/dev/null || true
+  echo "Docker environment removed."
+  pause
+}
+
 docker_menu() {
   require_root || return
   while true; do
     show_header
     echo "Docker Management"
     echo "------------------------"
-    echo "1. Install Docker"
-    echo "2. Docker Status"
-    echo "3. Start Docker"
-    echo "4. Stop Docker"
-    echo "5. Restart Docker"
-    echo "6. List Containers"
+    docker_counts_line
+    echo "------------------------"
+    echo "1.  Install/Update Docker env *"
+    echo "------------------------"
+    echo "2.  Docker global status *"
+    echo "------------------------"
+    echo "3.  Docker container manage *"
+    echo "4.  Docker image manage"
+    echo "5.  Docker network manage"
+    echo "6.  Docker volume manage"
+    echo "------------------------"
+    echo "7.  Clean unused containers/images/networks/volumes"
+    echo "------------------------"
+    echo "8.  Switch Docker mirror"
+    echo "9.  Edit daemon.json"
+    echo "------------------------"
+    echo "11. Enable Docker IPv6"
+    echo "12. Disable Docker IPv6"
+    echo "------------------------"
+    echo "19. Backup/Restore Docker env"
+    echo "20. Uninstall Docker env"
     echo "------------------------"
     echo -e "${yellow}0. RTM${white}"
     echo "------------------------"
@@ -2190,11 +2470,18 @@ docker_menu() {
         systemctl start docker >/dev/null 2>&1 || true
         pause
         ;;
-      2) systemctl status docker --no-pager || true; pause ;;
-      3) systemctl start docker || true; echo "Done."; pause ;;
-      4) systemctl stop docker || true; echo "Done."; pause ;;
-      5) systemctl restart docker || true; echo "Done."; pause ;;
-      6) docker ps -a 2>/dev/null || echo "Docker not installed/running."; pause ;;
+      2) docker_global_status ;;
+      3) docker_container_manage ;;
+      4) docker_image_manage ;;
+      5) docker_network_manage ;;
+      6) docker_volume_manage ;;
+      7) docker system prune -af --volumes; echo "Cleanup completed."; pause ;;
+      8) docker_switch_mirror ;;
+      9) docker_edit_daemon_json ;;
+      11) docker_set_ipv6_mode on ;;
+      12) docker_set_ipv6_mode off ;;
+      19) docker_backup_restore_env ;;
+      20) docker_uninstall_env ;;
       0) return ;;
       *) echo "Invalid choice"; pause ;;
     esac
