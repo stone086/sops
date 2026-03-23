@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-sh_v="0.1.0"
+sh_v="0.1.1"
 
-cyan='"'"'\033[96m'"'"'
-white='"'"'\033[0m'"'"'
+cyan='\033[96m'
+green='\033[32m'
+white='\033[0m'
 
 pause() {
-  read -r -p "按回车继续..." _
+  echo
+  read -r -n 1 -s -p "按任意键继续..."
+  echo
 }
 
 show_header() {
@@ -16,7 +19,162 @@ show_header() {
   echo "------------------------"
 }
 
-show_menu() {
+to_human() {
+  local bytes="${1:-0}"
+  awk -v b="$bytes" 'BEGIN{
+    split("B KB MB GB TB",u," ");
+    i=1;
+    while (b>=1024 && i<5){b/=1024;i++}
+    if (i==1) printf "%.0f%s", b, u[i];
+    else printf "%.2f%s", b, u[i];
+  }'
+}
+
+percent() {
+  local used="$1" total="$2"
+  if [ "${total:-0}" -eq 0 ]; then
+    echo "0.00%"
+  else
+    awk -v u="$used" -v t="$total" 'BEGIN{printf "%.2f%%", (u/t)*100}'
+  fi
+}
+
+cpu_usage_percent() {
+  local a b idle_a idle_b total_a total_b diff_idle diff_total
+  a=$(grep '^cpu ' /proc/stat)
+  sleep 0.5
+  b=$(grep '^cpu ' /proc/stat)
+
+  read -r _ user nice system idle iowait irq softirq steal _ <<<"$a"
+  idle_a=$((idle + iowait))
+  total_a=$((user + nice + system + idle + iowait + irq + softirq + steal))
+
+  read -r _ user nice system idle iowait irq softirq steal _ <<<"$b"
+  idle_b=$((idle + iowait))
+  total_b=$((user + nice + system + idle + iowait + irq + softirq + steal))
+
+  diff_idle=$((idle_b - idle_a))
+  diff_total=$((total_b - total_a))
+  if [ "$diff_total" -le 0 ]; then
+    echo "0%"
+  else
+    awk -v di="$diff_idle" -v dt="$diff_total" 'BEGIN{printf "%.0f%%", (1-di/dt)*100}'
+  fi
+}
+
+system_query() {
+  show_header
+  echo "系统信息查询"
+  echo "-------------"
+
+  local hostname os_pretty kernel
+  hostname="$(hostname)"
+  os_pretty="$(grep '^PRETTY_NAME=' /etc/os-release 2>/dev/null | cut -d= -f2- | tr -d '"' || true)"
+  [ -z "$os_pretty" ] && os_pretty="Unknown"
+  kernel="$(uname -r)"
+
+  echo "主机名：        ${hostname}"
+  echo "系统版本：      ${os_pretty}"
+  echo "Linux版本：     ${kernel}"
+  echo "-------------"
+
+  local cpu_arch cpu_model cpu_cores cpu_freq
+  cpu_arch="$(uname -m)"
+  cpu_model="$(lscpu 2>/dev/null | awk -F: '/Model name/ {gsub(/^[ \t]+/,"",$2); print $2; exit}')"
+  [ -z "$cpu_model" ] && cpu_model="$(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^[ \t]*//')"
+  [ -z "$cpu_model" ] && cpu_model="Unknown"
+  cpu_cores="$(nproc 2>/dev/null || echo 0)"
+  cpu_freq="$(lscpu 2>/dev/null | awk -F: '/CPU MHz/ {gsub(/^[ \t]+/,"",$2); printf "%.1f MHz",$2; exit}')"
+  [ -z "$cpu_freq" ] && cpu_freq="Unknown"
+
+  echo "CPU架构：       ${cpu_arch}"
+  echo "CPU型号：       ${cpu_model}"
+  echo "CPU核心数：     ${cpu_cores}"
+  echo "CPU频率：       ${cpu_freq}"
+  echo "-------------"
+
+  local cpu_usage load_avg tcp_conn udp_conn
+  cpu_usage="$(cpu_usage_percent)"
+  load_avg="$(awk '{print $1", "$2", "$3}' /proc/loadavg)"
+  tcp_conn="$(ss -ant 2>/dev/null | awk 'NR>1 {c++} END{print c+0}')"
+  udp_conn="$(ss -anu 2>/dev/null | awk 'NR>1 {c++} END{print c+0}')"
+
+  echo "CPU占用：       ${cpu_usage}"
+  echo "系统负载：      ${load_avg}"
+  echo "TCP/UDP连接数： ${tcp_conn}|${udp_conn}"
+
+  local mem_total mem_used swap_total swap_used
+  mem_total="$(free -b | awk '/^Mem:/ {print $2}')"
+  mem_used="$(free -b | awk '/^Mem:/ {print $3}')"
+  swap_total="$(free -b | awk '/^Swap:/ {print $2}')"
+  swap_used="$(free -b | awk '/^Swap:/ {print $3}')"
+
+  echo "物理内存：      $(to_human "$mem_used")/$(to_human "$mem_total") ($(percent "$mem_used" "$mem_total"))"
+  echo "虚拟内存：      $(to_human "$swap_used")/$(to_human "$swap_total") ($(percent "$swap_used" "$swap_total"))"
+
+  local disk_total disk_used
+  disk_total="$(df -B1 / | awk 'NR==2 {print $2}')"
+  disk_used="$(df -B1 / | awk 'NR==2 {print $3}')"
+  echo "硬盘占用：      $(to_human "$disk_used")/$(to_human "$disk_total") ($(percent "$disk_used" "$disk_total"))"
+  echo "-------------"
+
+  local rx_total tx_total
+  rx_total="$(awk -F'[: ]+' 'NR>2 {rx+=$3} END{print rx+0}' /proc/net/dev)"
+  tx_total="$(awk -F'[: ]+' 'NR>2 {tx+=$11} END{print tx+0}' /proc/net/dev)"
+  echo "总接收：        $(to_human "$rx_total")"
+  echo "总发送：        $(to_human "$tx_total")"
+  echo "-------------"
+
+  local cc qdisc
+  cc="$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo unknown)"
+  qdisc="$(sysctl -n net.core.default_qdisc 2>/dev/null || echo unknown)"
+  echo "网络算法：      ${cc} ${qdisc}"
+  echo "-------------"
+
+  local org ip dns tz now city region country
+  org="$(curl -fsSL --max-time 2 ipinfo.io/org 2>/dev/null || true)"
+  ip="$(curl -fsSL --max-time 2 ipinfo.io/ip 2>/dev/null || true)"
+  dns="$(awk '/^nameserver/ {printf("%s ",$2)} END{print ""}' /etc/resolv.conf | sed 's/[[:space:]]*$//')"
+  tz="$(timedatectl show -p Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null || echo Unknown)"
+  now="$(date '+%Y-%m-%d %I:%M %p')"
+  city="$(curl -fsSL --max-time 2 ipinfo.io/city 2>/dev/null || true)"
+  region="$(curl -fsSL --max-time 2 ipinfo.io/region 2>/dev/null || true)"
+  country="$(curl -fsSL --max-time 2 ipinfo.io/country 2>/dev/null || true)"
+
+  echo "运营商：        ${org:-Unknown}"
+  echo "IPv4地址：      ${ip:-Unknown}"
+  echo "DNS地址：       ${dns:-Unknown}"
+  echo "地理位置：      ${country:-Unknown} ${region:-} ${city:-}"
+  echo "系统时间：      ${tz}  ${now}"
+  echo "-------------"
+
+  local up
+  up="$(uptime -p 2>/dev/null | sed 's/^up //')"
+  [ -z "$up" ] && up="Unknown"
+  echo "运行时长：      ${up}"
+  echo
+  echo -e "${green}操作完成${white}"
+  pause
+}
+
+system_operations_menu() {
+  while true; do
+    show_header
+    echo "系统操作"
+    echo "------------------------"
+    echo "1. 系统查询"
+    echo "0. 返回主菜单"
+    echo "------------------------"
+    read -r -p "请输入你的选择： " sub_choice
+    case "${sub_choice}" in
+      1) system_query ;;
+      0) return ;;
+      *) echo "无效选择"; pause ;;
+    esac
+  done
+}
+
+show_main_menu() {
   echo "1.  系统操作"
   echo "2.  静等开发中...."
   echo "3.  静等开发中...."
@@ -40,12 +198,6 @@ show_menu() {
   echo "------------------------"
 }
 
-system_operations() {
-  echo "系统信息:"
-  echo "Hostname: $(hostname)"
-  echo "Kernel:   $(uname -srmo 2>/dev/null || uname -a)"
-}
-
 update_script() {
   local url="https://raw.githubusercontent.com/stone086/sops/main/sops.sh"
   echo "正在更新脚本..."
@@ -55,29 +207,27 @@ update_script() {
     wget -qO "${HOME}/sops.sh" "$url"
   else
     echo "更新失败：未找到 curl/wget"
+    pause
     return 1
   fi
   chmod +x "${HOME}/sops.sh"
   echo "脚本更新完成。"
+  pause
 }
 
 main() {
   while true; do
     show_header
-    show_menu
+    show_main_menu
     read -r -p "请输入你的选择： " choice
     case "${choice}" in
-      1) show_header; system_operations; pause ;;
+      1) system_operations_menu ;;
       2|3|4|5|6|7|8|9|10|11|12|13|14|15|16)
         show_header
         echo "静等开发中...."
         pause
         ;;
-      00)
-        show_header
-        update_script
-        pause
-        ;;
+      00) show_header; update_script ;;
       0) exit 0 ;;
       *) echo "无效选择"; pause ;;
     esac
