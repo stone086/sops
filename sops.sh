@@ -1969,44 +1969,184 @@ coming_soon_main() {
   pause
 }
 
+bbr_safe_placeholder() {
+  local title="$1"
+  show_header
+  echo "$title"
+  echo "------------------------"
+  echo "SOPS safe mode: this item is reserved."
+  echo "No third-party remote script is executed."
+  pause
+}
+
+bbr_apply_cc_qdisc() {
+  local cc="$1"
+  local qdisc="$2"
+  modprobe tcp_bbr 2>/dev/null || true
+  modprobe sch_fq 2>/dev/null || true
+  modprobe sch_fq_codel 2>/dev/null || true
+  modprobe sch_cake 2>/dev/null || true
+  cat >/etc/sysctl.d/99-sops-bbr.conf <<EOF
+net.core.default_qdisc=${qdisc}
+net.ipv4.tcp_congestion_control=${cc}
+EOF
+  sysctl --system >/dev/null 2>&1 || true
+}
+
+bbr_set_ecn() {
+  local val="$1"
+  cat >/etc/sysctl.d/99-sops-ecn.conf <<EOF
+net.ipv4.tcp_ecn=${val}
+EOF
+  sysctl --system >/dev/null 2>&1 || true
+}
+
+bbr_set_ipv6_state() {
+  local disable="$1"
+  cat >/etc/sysctl.d/99-sops-ipv6.conf <<EOF
+net.ipv6.conf.all.disable_ipv6=${disable}
+net.ipv6.conf.default.disable_ipv6=${disable}
+EOF
+  sysctl --system >/dev/null 2>&1 || true
+}
+
+bbr_kernel_list() {
+  dpkg -l 2>/dev/null | awk '/^ii  linux-image/ {print $2}' || true
+  rpm -qa 2>/dev/null | grep -E '^kernel' || true
+}
+
 bbr_menu() {
   require_root || return
   while true; do
     show_header
-    echo "BBR Management"
+    local cc qd avail ker
+    cc="$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo unknown)"
+    qd="$(sysctl -n net.core.default_qdisc 2>/dev/null || echo unknown)"
+    avail="$(sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null || echo unknown)"
+    ker="$(uname -r)"
+
+    echo "TCP Acceleration / Kernel Toolbox (SOPS)"
     echo "------------------------"
-    echo "Current: $(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo unknown)"
-    echo "Available: $(sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null || echo unknown)"
+    echo "0. Upgrade script                    9. Switch to kernel-remove mode"
+    echo "10. Switch to one-click DD mode      60. Switch to IP quality/media/mail tests"
+    echo "------------ Kernel Install ------------"
+    echo "1. Install BBR kernel                7. Install Zen kernel"
+    echo "2. Install BBRplus kernel            5. Install BBRplus new kernel"
+    echo "3. Install Lotserver kernel          8. Install cloud kernel"
+    echo "30. Install official stable kernel   31. Install official latest kernel"
+    echo "32. Install XANMOD main              33. Install XANMOD LTS"
+    echo "36. Install XANMOD EDGE              37. Install XANMOD RT"
+    echo "----------- Acceleration -----------"
+    echo "11. Use BBR+FQ                       12. Use BBR+FQ_PIE"
+    echo "13. Use BBR+CAKE                     14. Use BBR2+FQ"
+    echo "15. Use BBR2+FQ_PIE                  16. Use BBR2+CAKE"
+    echo "19. Use BBRplus+FQ                   20. Use Lotserver"
+    echo "28. Build brutal module"
+    echo "------------ System Config ------------"
+    echo "17. Enable ECN                       18. Disable ECN"
+    echo "21. Sysctl optimize (old)            22. Sysctl optimize (new)"
+    echo "23. Disable IPv6                     24. Enable IPv6"
+    echo "61. Print kernel params              62. Edit kernel params"
+    echo "------------- Kernel Management -------------"
+    echo "51. List kernels                     52. Remove old kernels"
+    echo "25. Reset acceleration               99. Exit"
     echo "------------------------"
-    echo "1. Refresh Status"
-    echo "2. Enable BBR"
-    echo "3. Set CUBIC"
+    echo "Info: $(grep '^PRETTY_NAME=' /etc/os-release 2>/dev/null | cut -d= -f2- | tr -d '\"' || echo unknown)  kernel: ${ker}"
+    echo "Status: cc=${cc}  qdisc=${qd}"
+    echo "Available cc: ${avail}"
     echo "------------------------"
-    echo -e "${yellow}0. RTM${white}"
-    echo "------------------------"
-    read_numeric_choice bbr_choice "Please enter your choice: "
+    read_numeric_choice bbr_choice "Please enter number: "
     case "${bbr_choice}" in
-      1) : ;;
-      2)
-        modprobe tcp_bbr 2>/dev/null || true
-        cat >/etc/sysctl.d/99-sops-bbr.conf <<'EOF'
-net.core.default_qdisc=fq
-net.ipv4.tcp_congestion_control=bbr
+      0) update_script ;;
+      1|2|3|5|7|8|32|33|36|37) bbr_safe_placeholder "Kernel install source not enabled in SOPS safe mode" ;;
+      9) bbr_safe_placeholder "Kernel remove mode (reserved)" ;;
+      10) bbr_safe_placeholder "One-click DD mode (reserved)" ;;
+      11) bbr_apply_cc_qdisc bbr fq; echo "Applied: BBR + FQ"; pause ;;
+      12) bbr_apply_cc_qdisc bbr fq_pie; echo "Applied: BBR + FQ_PIE"; pause ;;
+      13) bbr_apply_cc_qdisc bbr cake; echo "Applied: BBR + CAKE"; pause ;;
+      14)
+        if echo "$avail" | grep -qw bbr2; then bbr_apply_cc_qdisc bbr2 fq
+        elif echo "$avail" | grep -qw bbr3; then bbr_apply_cc_qdisc bbr3 fq
+        else bbr_apply_cc_qdisc bbr fq; fi
+        echo "Applied: BBR2/3 + FQ (fallback handled)."; pause ;;
+      15)
+        if echo "$avail" | grep -qw bbr2; then bbr_apply_cc_qdisc bbr2 fq_pie
+        elif echo "$avail" | grep -qw bbr3; then bbr_apply_cc_qdisc bbr3 fq_pie
+        else bbr_apply_cc_qdisc bbr fq_pie; fi
+        echo "Applied: BBR2/3 + FQ_PIE (fallback handled)."; pause ;;
+      16)
+        if echo "$avail" | grep -qw bbr2; then bbr_apply_cc_qdisc bbr2 cake
+        elif echo "$avail" | grep -qw bbr3; then bbr_apply_cc_qdisc bbr3 cake
+        else bbr_apply_cc_qdisc bbr cake; fi
+        echo "Applied: BBR2/3 + CAKE (fallback handled)."; pause ;;
+      17) bbr_set_ecn 1; echo "ECN enabled."; pause ;;
+      18) bbr_set_ecn 0; echo "ECN disabled."; pause ;;
+      19) bbr_apply_cc_qdisc bbr fq; echo "Applied: BBRplus+FQ compatible profile."; pause ;;
+      20) bbr_safe_placeholder "Lotserver is not integrated (closed-source/unsafe path blocked)." ;;
+      21)
+        cat >/etc/sysctl.d/99-sops-net-old.conf <<'EOF'
+net.core.somaxconn=1024
+net.ipv4.tcp_fin_timeout=30
+net.ipv4.tcp_tw_reuse=1
 EOF
         sysctl --system >/dev/null 2>&1 || true
-        echo "BBR has been applied."
+        echo "Old optimization applied."
         pause
         ;;
-      3)
-        cat >/etc/sysctl.d/99-sops-bbr.conf <<'EOF'
-net.core.default_qdisc=fq
-net.ipv4.tcp_congestion_control=cubic
+      22)
+        cat >/etc/sysctl.d/99-sops-net-new.conf <<'EOF'
+net.core.somaxconn=65535
+net.ipv4.tcp_max_syn_backlog=8192
+net.ipv4.tcp_fin_timeout=15
+net.ipv4.tcp_keepalive_time=600
 EOF
         sysctl --system >/dev/null 2>&1 || true
-        echo "CUBIC has been applied."
+        echo "New optimization applied."
         pause
         ;;
-      0) return ;;
+      23) bbr_set_ipv6_state 1; echo "IPv6 disabled."; pause ;;
+      24) bbr_set_ipv6_state 0; echo "IPv6 enabled."; pause ;;
+      25) bbr_apply_cc_qdisc cubic fq_codel; echo "Acceleration reset to cubic + fq_codel."; pause ;;
+      28) bbr_safe_placeholder "brutal module build is reserved." ;;
+      30)
+        install_package_for_current_pm "linux-image-amd64" "kernel" "kernel" "kernel-default" "linux" "linux-lts" || true
+        echo "Official stable kernel install command executed."
+        pause
+        ;;
+      31)
+        install_package_for_current_pm "linux-image-cloud-amd64 linux-image-amd64" "kernel" "kernel" "kernel-default" "linux" "linux-virt" || true
+        echo "Official latest kernel install command executed."
+        pause
+        ;;
+      51) show_header; echo "Installed kernels"; echo "------------------------"; bbr_kernel_list; pause ;;
+      52)
+        show_header
+        echo "Remove old kernels"
+        echo "------------------------"
+        if command -v apt-get >/dev/null 2>&1; then
+          apt-get -y autoremove --purge || true
+        elif command -v dnf >/dev/null 2>&1; then
+          dnf -y autoremove || true
+        elif command -v yum >/dev/null 2>&1; then
+          yum -y autoremove || true
+        else
+          echo "Kernel cleanup for this distro is manual."
+        fi
+        pause
+        ;;
+      60) test_suite_menu ;;
+      61) show_header; echo "Kernel-related parameters"; echo "------------------------"; sysctl -a 2>/dev/null | grep -E 'net\\.(core|ipv4|ipv6)|fs\\.file-max|vm\\.'; pause ;;
+      62)
+        local target="/etc/sysctl.d/99-sops-custom.conf"
+        touch "$target"
+        if command -v nano >/dev/null 2>&1; then nano "$target";
+        elif command -v vi >/dev/null 2>&1; then vi "$target";
+        else echo "No editor found: $target"; pause; continue; fi
+        sysctl --system >/dev/null 2>&1 || true
+        echo "Custom kernel params applied."
+        pause
+        ;;
+      99) return ;;
       *) echo "Invalid choice"; pause ;;
     esac
   done
