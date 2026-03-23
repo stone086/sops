@@ -294,7 +294,7 @@ update_script() {
 
   local update_url tmp_file target_file
   update_url="https://raw.githubusercontent.com/stone086/sops/main/sops.sh"
-  tmp_file="/tmp/sops.sh.$"
+  tmp_file="/tmp/sops.sh.$$"
   target_file="${HOME}/sops.sh"
 
   if command -v curl >/dev/null 2>&1; then
@@ -323,7 +323,8 @@ update_script() {
   fi
 
   echo "Updated from GitHub successfully."
-  pause
+  echo "Restarting with the new script..."
+  exec bash "$target_file"
 }
 
 main() {
