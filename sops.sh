@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-sh_v="0.1.2"
+sh_v="0.1.3"
 
 cyan='\033[96m'
 green='\033[32m'
-yellow='\033[33m'
 white='\033[0m'
 
 pause() {
   echo
-  read -r -n 1 -s -p "閹稿鎹㈤幇蹇涙暛缂佈呯敾..."
+  read -r -n 1 -s -p "按任意键继续..."
   echo
 }
 
@@ -22,7 +21,7 @@ show_header() {
 
 require_root() {
   if [ "${EUID:-$(id -u)}" -ne 0 ]; then
-    echo "鐠囥儱濮涢懗浠嬫付鐟?root 閺夊啴妾洪妴?
+    echo "该功能需要 root 权限。"
     pause
     return 1
   fi
@@ -74,7 +73,7 @@ cpu_usage_percent() {
 
 system_query() {
   show_header
-  echo "缁崵绮烘穱鈩冧紖閺屻儴顕?
+  echo "系统信息查询"
   echo "-------------"
 
   local host os_pretty kernel
@@ -83,9 +82,9 @@ system_query() {
   [ -z "$os_pretty" ] && os_pretty="Unknown"
   kernel="$(uname -r)"
 
-  echo "娑撶粯婧€閸氬稄绱?       ${host}"
-  echo "缁崵绮洪悧鍫熸拱閿?     ${os_pretty}"
-  echo "Linux閻楀牊婀伴敍?    ${kernel}"
+  echo "主机名:        ${host}"
+  echo "系统版本:      ${os_pretty}"
+  echo "Linux版本:     ${kernel}"
   echo "-------------"
 
   local cpu_arch cpu_model cpu_cores cpu_freq
@@ -97,10 +96,10 @@ system_query() {
   cpu_freq="$(lscpu 2>/dev/null | awk -F: '/CPU MHz/ {gsub(/^[ \t]+/,"",$2); printf "%.1f MHz",$2; exit}')"
   [ -z "$cpu_freq" ] && cpu_freq="Unknown"
 
-  echo "CPU閺嬭埖鐎敍?      ${cpu_arch}"
-  echo "CPU閸ㄥ褰块敍?      ${cpu_model}"
-  echo "CPU閺嶇绺鹃弫甯窗     ${cpu_cores}"
-  echo "CPU妫版垹宸奸敍?      ${cpu_freq}"
+  echo "CPU架构:       ${cpu_arch}"
+  echo "CPU型号:       ${cpu_model}"
+  echo "CPU核心数:     ${cpu_cores}"
+  echo "CPU频率:       ${cpu_freq}"
   echo "-------------"
 
   local cpu_usage load_avg tcp_conn udp_conn
@@ -109,9 +108,9 @@ system_query() {
   tcp_conn="$(ss -ant 2>/dev/null | awk 'NR>1 {c++} END{print c+0}')"
   udp_conn="$(ss -anu 2>/dev/null | awk 'NR>1 {c++} END{print c+0}')"
 
-  echo "CPU閸楃姷鏁ら敍?      ${cpu_usage}"
-  echo "缁崵绮虹拹鐔绘祰閿?     ${load_avg}"
-  echo "TCP/UDP鏉╃偞甯撮弫甯窗 ${tcp_conn}|${udp_conn}"
+  echo "CPU占用:       ${cpu_usage}"
+  echo "系统负载:      ${load_avg}"
+  echo "TCP/UDP连接数: ${tcp_conn}|${udp_conn}"
 
   local mem_total mem_used swap_total swap_used
   mem_total="$(free -b | awk '/^Mem:/ {print $2}')"
@@ -119,26 +118,26 @@ system_query() {
   swap_total="$(free -b | awk '/^Swap:/ {print $2}')"
   swap_used="$(free -b | awk '/^Swap:/ {print $3}')"
 
-  echo "閻椻晝鎮婇崘鍛摠閿?     $(to_human "$mem_used")/$(to_human "$mem_total") ($(percent "$mem_used" "$mem_total"))"
-  echo "閾忔碍瀚欓崘鍛摠閿?     $(to_human "$swap_used")/$(to_human "$swap_total") ($(percent "$swap_used" "$swap_total"))"
+  echo "物理内存:      $(to_human "$mem_used")/$(to_human "$mem_total") ($(percent "$mem_used" "$mem_total"))"
+  echo "虚拟内存:      $(to_human "$swap_used")/$(to_human "$swap_total") ($(percent "$swap_used" "$swap_total"))"
 
   local disk_total disk_used
   disk_total="$(df -B1 / | awk 'NR==2 {print $2}')"
   disk_used="$(df -B1 / | awk 'NR==2 {print $3}')"
-  echo "绾剛娲忛崡鐘垫暏閿?     $(to_human "$disk_used")/$(to_human "$disk_total") ($(percent "$disk_used" "$disk_total"))"
+  echo "硬盘占用:      $(to_human "$disk_used")/$(to_human "$disk_total") ($(percent "$disk_used" "$disk_total"))"
   echo "-------------"
 
   local rx_total tx_total
   rx_total="$(awk -F'[: ]+' 'NR>2 {rx+=$3} END{print rx+0}' /proc/net/dev)"
   tx_total="$(awk -F'[: ]+' 'NR>2 {tx+=$11} END{print tx+0}' /proc/net/dev)"
-  echo "閹粯甯撮弨璁圭窗        $(to_human "$rx_total")"
-  echo "閹褰傞柅渚婄窗        $(to_human "$tx_total")"
+  echo "总接收:        $(to_human "$rx_total")"
+  echo "总发送:        $(to_human "$tx_total")"
   echo "-------------"
 
   local cc qdisc
   cc="$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo unknown)"
   qdisc="$(sysctl -n net.core.default_qdisc 2>/dev/null || echo unknown)"
-  echo "缂冩垹绮剁粻妤佺《閿?     ${cc} ${qdisc}"
+  echo "网络算法:      ${cc} ${qdisc}"
   echo "-------------"
 
   local org ip dns tz now city region country
@@ -151,19 +150,19 @@ system_query() {
   region="$(curl -fsSL --max-time 2 ipinfo.io/region 2>/dev/null || true)"
   country="$(curl -fsSL --max-time 2 ipinfo.io/country 2>/dev/null || true)"
 
-  echo "鏉╂劘鎯€閸熷棴绱?       ${org:-Unknown}"
-  echo "IPv4閸︽澘娼冮敍?     ${ip:-Unknown}"
-  echo "DNS閸︽澘娼冮敍?      ${dns:-Unknown}"
-  echo "閸︽壆鎮婃担宥囩枂閿?     ${country:-Unknown} ${region:-} ${city:-}"
-  echo "缁崵绮洪弮鍫曟？閿?     ${tz}  ${now}"
+  echo "运营商:        ${org:-Unknown}"
+  echo "IPv4地址:      ${ip:-Unknown}"
+  echo "DNS地址:       ${dns:-Unknown}"
+  echo "地理位置:      ${country:-Unknown} ${region:-} ${city:-}"
+  echo "系统时间:      ${tz}  ${now}"
   echo "-------------"
 
   local up
   up="$(uptime -p 2>/dev/null | sed 's/^up //')"
   [ -z "$up" ] && up="Unknown"
-  echo "鏉╂劘顢戦弮鍫曟毐閿?     ${up}"
+  echo "运行时长:      ${up}"
   echo
-  echo -e "${green}閹垮秳缍旂€瑰本鍨?{white}"
+  echo -e "${green}操作完成${white}"
   pause
 }
 
@@ -188,34 +187,31 @@ detect_update_cmd() {
 system_update() {
   require_root || return
   show_header
-  echo "缁崵绮洪弴瀛樻煀"
+  echo "系统更新"
   echo "------------------------"
 
   local cmd
   cmd="$(detect_update_cmd)"
   if [ -z "$cmd" ]; then
-    echo "閺堫亣鐦戦崚顐㈠煂閸欐鏁幐浣烘畱閸栧懐顓搁悶鍡楁珤閿涘本妫ゅ▔鏇″殰閸斻劍娲块弬鑸偓?
+    echo "未识别到支持的包管理器，无法自动更新。"
     pause
     return
   fi
 
-  echo "鐏忓棙澧界悰灞炬纯閺傛澘鎳℃禒銈忕窗"
+  echo "将执行更新命令:"
   echo "$cmd"
   echo "------------------------"
-  echo "瀵偓婵娲块弬?.."
   bash -lc "$cmd"
-  echo "閺囧瓨鏌婄€瑰本鍨氶妴?
+  echo "更新完成。"
   pause
-  return
 }
 
 system_cleanup() {
   require_root || return
   show_header
-  echo "缁崵绮哄〒鍛倞"
+  echo "系统清理"
   echo "------------------------"
-  echo "鐏忓棙澧界悰宀嬬窗缂傛挸鐡ㄥ〒鍛倞閵嗕焦妫ら悽銊ょ贩鐠ф牗绔婚悶鍡愨偓浣规）韫?娑撳瓨妞傞弬鍥︽濞撳懐鎮婇敍鍫濈暔閸忋劎澧楅敍?
-  echo "瀵偓婵绔婚悶?.."
+  echo "自动执行缓存、无用依赖、日志和临时文件清理。"
 
   if command -v apt-get >/dev/null 2>&1; then
     apt-get -y autoremove --purge || true
@@ -239,58 +235,59 @@ system_cleanup() {
   find /tmp -mindepth 1 -mtime +3 -exec rm -rf {} + 2>/dev/null || true
   find /var/tmp -mindepth 1 -mtime +3 -exec rm -rf {} + 2>/dev/null || true
 
-  echo "缁崵绮哄〒鍛倞鐎瑰本鍨氶妴?
+  echo "系统清理完成。"
   pause
 }
 
 system_operations_menu() {
   while true; do
     show_header
-    echo "缁崵绮洪幙宥勭稊"
+    echo "系统操作"
     echo "------------------------"
-    echo "1. 缁崵绮洪弻銉嚄"
-    echo "2. 缁崵绮洪弴瀛樻煀"
-    echo "3. 缁崵绮哄〒鍛倞"
+    echo "1. 系统查询"
+    echo "2. 系统更新"
+    echo "3. 系统清理"
     echo "------------------------"
-    echo "0. 鏉╂柨娲栨稉鏄忓綅閸?
+    echo "0. 返回主菜单"
     echo "------------------------"
-    read -r -p "鐠囩柉绶崗銉ょ稑閻ㄥ嫰鈧瀚ㄩ敍?" sub_choice
+    read -r -p "请输入你的选择: " sub_choice
     case "${sub_choice}" in
       1) system_query ;;
       2) system_update ;;
       3) system_cleanup ;;
       0) return ;;
-      *) echo "閺冪姵鏅ラ柅澶嬪"; pause ;;
+      *) echo "无效选择"; pause ;;
     esac
   done
 }
 
 show_main_menu() {
-  echo "1.  缁崵绮洪幙宥勭稊"
-  echo "2.  闂堟瑧鐡戝鈧崣鎴滆厬...."
-  echo "3.  闂堟瑧鐡戝鈧崣鎴滆厬...."
-  echo "4.  闂堟瑧鐡戝鈧崣鎴滆厬...."
-  echo "5.  闂堟瑧鐡戝鈧崣鎴滆厬...."
-  echo "6.  闂堟瑧鐡戝鈧崣鎴滆厬...."
-  echo "7.  闂堟瑧鐡戝鈧崣鎴滆厬...."
-  echo "8.  闂堟瑧鐡戝鈧崣鎴滆厬...."
-  echo "9.  闂堟瑧鐡戝鈧崣鎴滆厬...."
-  echo "10. 闂堟瑧鐡戝鈧崣鎴滆厬...."
-  echo "11. 闂堟瑧鐡戝鈧崣鎴滆厬...."
-  echo "12. 闂堟瑧鐡戝鈧崣鎴滆厬...."
-  echo "13. 闂堟瑧鐡戝鈧崣鎴滆厬...."
-  echo "14. 闂堟瑧鐡戝鈧崣鎴滆厬...."
-  echo "15. 闂堟瑧鐡戝鈧崣鎴滆厬...."
-  echo "16. 闂堟瑧鐡戝鈧崣鎴滆厬...."
+  echo "1.  系统操作"
+  echo "2.  静等开发中...."
+  echo "3.  静等开发中...."
+  echo "4.  静等开发中...."
+  echo "5.  静等开发中...."
+  echo "6.  静等开发中...."
+  echo "7.  静等开发中...."
+  echo "8.  静等开发中...."
+  echo "9.  静等开发中...."
+  echo "10. 静等开发中...."
+  echo "11. 静等开发中...."
+  echo "12. 静等开发中...."
+  echo "13. 静等开发中...."
+  echo "14. 静等开发中...."
+  echo "15. 静等开发中...."
+  echo "16. 静等开发中...."
   echo "------------------------"
-  echo "00. 閼存碍婀伴弴瀛樻煀"
+  echo "00. 脚本更新"
   echo "------------------------"
-  echo "0.  闁偓閸戦缚鍓奸張?
+  echo "0.  退出脚本"
   echo "------------------------"
 }
 
 update_script() {
-  echo "Updating script from GitHub..."
+  show_header
+  echo "联网更新脚本中..."
 
   local update_url tmp_file target_file
   update_url="https://raw.githubusercontent.com/stone086/sops/main/sops.sh"
@@ -302,18 +299,19 @@ update_script() {
   elif command -v wget >/dev/null 2>&1; then
     wget -qO "$tmp_file" "$update_url"
   else
-    echo "curl/wget not found, cannot update online."
+    echo "未检测到 curl/wget，无法联网更新。"
     pause
     return
   fi
 
   if [ ! -s "$tmp_file" ]; then
-    echo "Download failed: empty update file."
+    echo "下载失败：更新文件为空。"
     rm -f "$tmp_file" 2>/dev/null || true
     pause
     return
   fi
 
+  chmod +x "$tmp_file" 2>/dev/null || true
   mv -f "$tmp_file" "$target_file"
   chmod +x "$target_file" 2>/dev/null || true
 
@@ -322,8 +320,7 @@ update_script() {
     ln -sf /usr/local/bin/s /usr/bin/s 2>/dev/null || true
   fi
 
-  echo "Updated from GitHub successfully."
-  echo "Restarting with the new script..."
+  echo "已从 GitHub 更新完成，正在重启脚本..."
   exec bash "$target_file"
 }
 
@@ -331,17 +328,17 @@ main() {
   while true; do
     show_header
     show_main_menu
-    read -r -p "鐠囩柉绶崗銉ょ稑閻ㄥ嫰鈧瀚ㄩ敍?" choice
+    read -r -p "请输入你的选择: " choice
     case "${choice}" in
       1) system_operations_menu ;;
       2|3|4|5|6|7|8|9|10|11|12|13|14|15|16)
         show_header
-        echo "闂堟瑧鐡戝鈧崣鎴滆厬...."
+        echo "静等开发中...."
         pause
         ;;
-      00) show_header; update_script ;;
+      00) update_script ;;
       0) exit 0 ;;
-      *) echo "閺冪姵鏅ラ柅澶嬪"; pause ;;
+      *) echo "无效选择"; pause ;;
     esac
   done
 }
