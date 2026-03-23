@@ -36,18 +36,18 @@ status_mark() {
   IFS='|' read -r -a _cmds <<< "$spec"
   for cmd in "${_cmds[@]}"; do
     if command -v "$cmd" >/dev/null 2>&1; then
-      printf "${bold}${green}✓${white}"
+      printf "${bold}${green}鉁?{white}"
       return 0
     fi
   done
-  printf "${bold}${red}✗${white}"
+  printf "${bold}${red}鉁?{white}"
 }
 
 basic_star() {
   local code="$1"
   case "$code" in
     101|104|106|201|301|303|401|501|601|801|804|807)
-      printf " ${yellow}★${white}"
+      printf " ${yellow}鈽?{white}"
       ;;
     *)
       printf ""
@@ -80,7 +80,7 @@ install_package_for_current_pm() {
   case "$pm" in
     apt)
       [ -n "$apt_pkg" ] || return 1
-      apt-get update -y >/dev/null 2>&1 || true
+      apt-get update >/dev/null 2>&1 || true
       apt-get install -y $apt_pkg
       ;;
     dnf)
@@ -124,7 +124,37 @@ ensure_tool_dependencies() {
     102) install_command_if_missing traceroute "traceroute" "traceroute" "traceroute" "traceroute" "traceroute" "traceroute" || true ;;
     103) install_command_if_missing mtr "mtr" "mtr" "mtr" "mtr" "mtr" "mtr" || true ;;
     104) install_command_if_missing curl "curl" "curl" "curl" "curl" "curl" "curl" || true ;;
-    105) install_command_if_missing nc "netcat-openbsd" "nmap-ncat" "nmap-ncat" "netcat-openbsd" "gnu-netcat" "netcat-openbsd" || true ;;
+    105)
+      # Port check tool package names vary by distro; try multiple candidates.
+      if ! command -v nc >/dev/null 2>&1 && ! command -v ncat >/dev/null 2>&1; then
+        local pm
+        pm="$(detect_pkg_manager)"
+        case "$pm" in
+          apt)
+            apt-get update >/dev/null 2>&1 || true
+            apt-get install -y netcat-openbsd >/dev/null 2>&1 \
+              || apt-get install -y netcat-traditional >/dev/null 2>&1 \
+              || apt-get install -y netcat >/dev/null 2>&1 \
+              || true
+            ;;
+          dnf)
+            dnf -y install nmap-ncat >/dev/null 2>&1 || dnf -y install nc >/dev/null 2>&1 || true
+            ;;
+          yum)
+            yum -y install nmap-ncat >/dev/null 2>&1 || yum -y install nc >/dev/null 2>&1 || true
+            ;;
+          zypper)
+            zypper --non-interactive in netcat-openbsd >/dev/null 2>&1 || zypper --non-interactive in netcat >/dev/null 2>&1 || true
+            ;;
+          pacman)
+            pacman -Sy --noconfirm gnu-netcat >/dev/null 2>&1 || pacman -Sy --noconfirm openbsd-netcat >/dev/null 2>&1 || true
+            ;;
+          apk)
+            apk add --no-cache netcat-openbsd >/dev/null 2>&1 || apk add --no-cache netcat-openbsd-bsd >/dev/null 2>&1 || true
+            ;;
+        esac
+      fi
+      ;;
     106)
       install_command_if_missing dig "dnsutils" "bind-utils" "bind-utils" "bind-utils" "bind" "bind-tools" || true
       install_command_if_missing nslookup "dnsutils" "bind-utils" "bind-utils" "bind-utils" "bind" "bind-tools" || true
@@ -139,8 +169,37 @@ ensure_tool_dependencies() {
       install_command_if_missing ssh "openssh-client openssh-server" "openssh-clients openssh-server" "openssh-clients openssh-server" "openssh-clients openssh" "openssh" "openssh-client openssh-server" || true
       ;;
     604) install_command_if_missing fail2ban-client "fail2ban" "fail2ban" "fail2ban" "fail2ban" "fail2ban" "fail2ban" || true ;;
-    801|802) install_command_if_missing timedatectl "systemd" "systemd" "systemd" "systemd" "systemd" "openrc" || true ;;
-    803) install_command_if_missing ntpdate "ntpdate" "chrony" "ntpdate" "ntp" "ntp" "openntpd" || true ;;
+    801|802) : ;;
+    803)
+      if ! command -v ntpdate >/dev/null 2>&1 && ! command -v chronyc >/dev/null 2>&1 && ! command -v timedatectl >/dev/null 2>&1; then
+        local pm
+        pm="$(detect_pkg_manager)"
+        case "$pm" in
+          apt)
+            apt-get update >/dev/null 2>&1 || true
+            apt-get install -y chrony >/dev/null 2>&1 \
+              || apt-get install -y ntpdate >/dev/null 2>&1 \
+              || apt-get install -y ntp >/dev/null 2>&1 \
+              || true
+            ;;
+          dnf)
+            dnf -y install chrony >/dev/null 2>&1 || dnf -y install ntpsec >/dev/null 2>&1 || true
+            ;;
+          yum)
+            yum -y install chrony >/dev/null 2>&1 || yum -y install ntp >/dev/null 2>&1 || true
+            ;;
+          zypper)
+            zypper --non-interactive in chrony >/dev/null 2>&1 || zypper --non-interactive in ntp >/dev/null 2>&1 || true
+            ;;
+          pacman)
+            pacman -Sy --noconfirm chrony >/dev/null 2>&1 || pacman -Sy --noconfirm ntp >/dev/null 2>&1 || true
+            ;;
+          apk)
+            apk add --no-cache chrony >/dev/null 2>&1 || apk add --no-cache openntpd >/dev/null 2>&1 || true
+            ;;
+        esac
+      fi
+      ;;
     807|808) install_command_if_missing tar "tar" "tar" "tar" "tar" "tar" "tar" || true ;;
     809) install_command_if_missing sysctl "procps" "procps-ng" "procps-ng" "procps" "procps-ng" "procps" || true ;;
   esac
@@ -1099,7 +1158,7 @@ op_openssh_cve_fix() {
   pm="$(detect_pkg_manager)"
   case "$pm" in
     apt)
-      apt-get update -y
+      apt-get update
       apt-get install --only-upgrade -y openssh-server openssh-client || apt-get install -y openssh-server openssh-client
       ;;
     dnf) dnf -y upgrade openssh openssh-server openssh-clients || true ;;
@@ -1173,7 +1232,7 @@ op_install_python_version() {
 
   case "$pm" in
     apt)
-      apt-get update -y
+      apt-get update
       if [ -n "$ver" ]; then
         apt-get install -y "python${ver}" "python${ver}-venv" "python${ver}-distutils" || apt-get install -y python3 python3-venv
       else
@@ -1272,7 +1331,7 @@ op_switch_package_mirror() {
       else
         sed -i 's|http://[^ ]*deb.debian.org/debian|http://deb.debian.org/debian|g; s|http://[^ ]*security.debian.org/debian-security|http://security.debian.org/debian-security|g' /etc/apt/sources.list || true
       fi
-      apt-get update -y || true
+      apt-get update || true
       ;;
     dnf|yum)
       ${pm} clean all || true
@@ -1717,7 +1776,7 @@ system_operations_menu() {
     echo " 9. Install Python Version            10. Open All Ports"
     echo "------------------------"
     echo "11. Change SSH Port                   12. Optimize DNS"
-    echo "13. Reinstall OS ★                    14. Disable Root + New User"
+    echo "13. Reinstall OS 鈽?                   14. Disable Root + New User"
     echo "15. Prefer IPv4/IPv6                 16. Resize Swap"
     echo "17. User Management                   18. User/Password Generator"
     echo "19. Timezone Settings                 20. Enable BBR3"
@@ -1728,17 +1787,17 @@ system_operations_menu() {
     echo "27. Traffic-limit Auto Shutdown       28. Key Login Mode"
     echo "29. TG-bot Monitoring                 30. OpenSSH CVE Fix"
     echo "------------------------"
-    echo "31. RHEL Kernel Upgrade               32. Kernel Parameter Optimize ★"
-    echo "33. Virus Scanner ★                   34. File Manager"
-    echo "35. Switch System Language            36. CLI Beautifier ★"
+    echo "31. RHEL Kernel Upgrade               32. Kernel Parameter Optimize 鈽?
+    echo "33. Virus Scanner 鈽?                  34. File Manager"
+    echo "35. Switch System Language            36. CLI Beautifier 鈽?
     echo "37. Recycle Bin                       38. Backup & Restore"
     echo "39. SSH Remote Tool                   40. Disk Partition Tool"
     echo "------------------------"
     echo "41. Command History                   42. Rsync Remote Sync"
-    echo "43. Command Favorites ★               44. NIC Manager"
-    echo "45. System Log Manager ★              46. Env Variable Manager"
-    echo "47. One-click Full Tuning ★           48. Privacy & Security"
-    echo "49. s Command Advanced Usage ★"
+    echo "43. Command Favorites 鈽?              44. NIC Manager"
+    echo "45. System Log Manager 鈽?             46. Env Variable Manager"
+    echo "47. One-click Full Tuning 鈽?          48. Privacy & Security"
+    echo "49. s Command Advanced Usage 鈽?
     echo "------------------------"
     echo -e "${yellow}0. RTM${white}"
     echo "------------------------"
@@ -1817,37 +1876,37 @@ base_tools_menu() {
     show_header
     echo "Basic Tools"
     echo "------------------------"
-    echo "[Category 1] Network Tools"
+    echo "C1 Network"
     echo -e "101. Ping Test$(basic_star 101) [$(status_mark 'ping')]                    102. Traceroute$(basic_star 102) [$(status_mark 'traceroute|tracepath')]"
     echo -e "103. MTR Test$(basic_star 103) [$(status_mark 'mtr')]                     104. HTTP Connectivity Check$(basic_star 104) [$(status_mark 'curl|wget')]"
     echo -e "105. Port Connectivity Check$(basic_star 105) [$(status_mark 'nc|ncat')]      106. DNS Lookup$(basic_star 106) [$(status_mark 'dig|nslookup')]"
     echo "------------------------"
-    echo "[Category 2] Disk Tools"
+    echo "C2 Disk"
     echo -e "201. Disk Usage Overview$(basic_star 201) [$(status_mark 'df')]          202. Large Files Scan$(basic_star 202) [$(status_mark 'find')]"
     echo -e "203. Inode Usage Check$(basic_star 203) [$(status_mark 'df')]            204. Mount Info$(basic_star 204) [$(status_mark 'mount')]"
     echo "------------------------"
-    echo "[Category 3] Process Tools"
+    echo "C3 Process"
     echo -e "301. Top Processes$(basic_star 301) [$(status_mark 'ps')]                302. Kill Process$(basic_star 302) [$(status_mark 'kill')]"
     echo -e "303. Listening Ports$(basic_star 303) [$(status_mark 'ss|netstat')]              304. Service Status$(basic_star 304) [$(status_mark 'systemctl|service')]"
     echo "------------------------"
-    echo "[Category 4] Log Tools"
+    echo "C4 Logs"
     echo -e "401. System Journal (latest)$(basic_star 401) [$(status_mark 'journalctl')]      402. SSH Log Quick View$(basic_star 402) [$(status_mark 'ssh')]"
     echo -e "403. Nginx/Apache Log Quick View$(basic_star 403) [$(status_mark 'nginx|apache2|httpd')]"
     echo "------------------------"
-    echo "[Category 5] Firewall Tools"
+    echo "C5 Firewall"
     echo -e "501. Firewall Status$(basic_star 501) [$(status_mark 'ufw|firewall-cmd|iptables')]              502. Open Port$(basic_star 502) [$(status_mark 'ufw|firewall-cmd|iptables')]"
     echo -e "503. Close Port$(basic_star 503) [$(status_mark 'ufw|firewall-cmd|iptables')]                   504. Firewall Rules List$(basic_star 504) [$(status_mark 'ufw|firewall-cmd|iptables')]"
     echo "------------------------"
-    echo "[Category 6] SSH Security Tools"
+    echo "C6 SSH"
     echo -e "601. SSH Security Check$(basic_star 601) [$(status_mark 'ssh|sshd')]           602. Change SSH Port$(basic_star 602) [$(status_mark 'ssh|sshd')]"
     echo -e "603. Password/Key Auth Check$(basic_star 603) [$(status_mark 'ssh|ssh-keygen')]      604. Fail2ban Status$(basic_star 604) [$(status_mark 'fail2ban-client')]"
     echo "------------------------"
-    echo "[Category 7] User & Auth Tools"
+    echo "C7 Users"
     echo -e "701. Create User$(basic_star 701) [$(status_mark 'useradd')]                  702. Delete User$(basic_star 702) [$(status_mark 'userdel')]"
     echo -e "703. Grant Sudo$(basic_star 703) [$(status_mark 'usermod')]                   704. Revoke Sudo$(basic_star 704) [$(status_mark 'usermod')]"
     echo -e "705. Manage authorized_keys$(basic_star 705) [$(status_mark 'ssh|ssh-copy-id')]"
     echo "------------------------"
-    echo "[Category 8] Maintenance Tools"
+    echo "C8 Maint"
     echo -e "801. Show Timezone$(basic_star 801) [$(status_mark 'timedatectl')]                802. Set Timezone$(basic_star 802) [$(status_mark 'timedatectl')]"
     echo -e "803. NTP Sync$(basic_star 803) [$(status_mark 'timedatectl|ntpdate')]                     804. Package Install$(basic_star 804) [$(status_mark 'apt-get|dnf|yum|zypper|pacman|apk')]"
     echo -e "805. Package Remove$(basic_star 805) [$(status_mark 'apt-get|dnf|yum|zypper|pacman|apk')]               806. Package Search$(basic_star 806) [$(status_mark 'apt-cache|dnf|yum|zypper|pacman|apk')]"
@@ -1958,7 +2017,7 @@ docker_install_if_needed() {
   local pm
   pm="$(detect_pkg_manager)"
   case "$pm" in
-    apt) apt-get update -y && apt-get install -y docker.io ;;
+    apt) apt-get update && apt-get install -y docker.io ;;
     dnf) dnf -y install docker ;;
     yum) yum -y install docker ;;
     zypper) zypper --non-interactive in docker ;;
@@ -2229,7 +2288,7 @@ workspace_menu() {
     echo " 7. Workspace-07                    8. Workspace-08"
     echo " 9. Workspace-09                    10. Workspace-10"
     echo "------------------------"
-    echo "21. SSH Resident Mode ★"
+    echo "21. SSH Resident Mode 鈽?
     echo "22. Create/Enter Workspace"
     echo "23. Inject Command to Workspace"
     echo "24. Delete Workspace"
@@ -2441,9 +2500,9 @@ cluster_control_center() {
       2) cluster_remove_server ;;
       3) cluster_edit_servers ;;
       11) cluster_push_sops ;;
-      12) cluster_run_batch "apt-get update -y && apt-get -y upgrade || dnf -y upgrade --refresh || yum -y update || zypper --non-interactive update || pacman -Syu --noconfirm || apk upgrade" "Batch system update" ;;
+      12) cluster_run_batch "apt-get update && apt-get -y upgrade || dnf -y upgrade --refresh || yum -y update || zypper --non-interactive update || pacman -Syu --noconfirm || apk upgrade" "Batch system update" ;;
       13) cluster_run_batch "apt-get -y autoremove --purge && apt-get -y clean || dnf -y autoremove && dnf -y clean all || yum -y autoremove && yum -y clean all || zypper --non-interactive clean --all || pacman -Sc --noconfirm || apk cache clean" "Batch system cleanup" ;;
-      14) cluster_run_batch "apt-get update -y && apt-get install -y docker.io || dnf -y install docker || yum -y install docker || zypper --non-interactive in docker || pacman -Sy --noconfirm docker || apk add --no-cache docker; systemctl enable docker >/dev/null 2>&1 || true; systemctl start docker >/dev/null 2>&1 || true" "Batch install Docker" ;;
+      14) cluster_run_batch "apt-get update && apt-get install -y docker.io || dnf -y install docker || yum -y install docker || zypper --non-interactive in docker || pacman -Sy --noconfirm docker || apk add --no-cache docker; systemctl enable docker >/dev/null 2>&1 || true; systemctl start docker >/dev/null 2>&1 || true" "Batch install Docker" ;;
       15) cluster_run_batch "modprobe tcp_bbr 2>/dev/null || true; if sysctl net.ipv4.tcp_available_congestion_control 2>/dev/null | grep -qw bbr3; then sysctl -w net.core.default_qdisc=fq; sysctl -w net.ipv4.tcp_congestion_control=bbr3; else sysctl -w net.core.default_qdisc=fq; sysctl -w net.ipv4.tcp_congestion_control=bbr; fi" "Batch enable BBR/BBR3" ;;
       16) cluster_run_batch "swapoff -a 2>/dev/null || true; rm -f /swapfile; dd if=/dev/zero of=/swapfile bs=1M count=1024 status=none; chmod 600 /swapfile; mkswap /swapfile >/dev/null; swapon /swapfile; grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' >>/etc/fstab" "Batch set 1024MB swap" ;;
       17) cluster_run_batch "timedatectl set-timezone Asia/Shanghai 2>/dev/null || ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime" "Batch timezone set" ;;
@@ -2516,7 +2575,7 @@ cluster_menu() {
     echo "------------------------"
     echo "1. Install cluster environment"
     echo "------------------------"
-    echo "2. Cluster control center ★"
+    echo "2. Cluster control center 鈽?
     echo "------------------------"
     echo "7. Backup cluster environment"
     echo "8. Restore cluster environment"
