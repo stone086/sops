@@ -215,11 +215,7 @@ system_cleanup() {
   echo "系统清理"
   echo "------------------------"
   echo "将执行：缓存清理、无用依赖清理、日志/临时文件清理（安全版）"
-  read -r -p "确认执行清理？(y/N): " yn
-  case "${yn}" in
-    y|Y) ;;
-    *) echo "已取消清理。"; pause; return ;;
-  esac
+  echo "开始清理..."
 
   if command -v apt-get >/dev/null 2>&1; then
     apt-get -y autoremove --purge || true
