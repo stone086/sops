@@ -3154,20 +3154,6 @@ EOF
   pause
 }
 
-prosody_config_lua() {
-  require_root || return
-  local cfg="/etc/prosody/prosody.cfg.lua"
-  mkdir -p /etc/prosody >/dev/null 2>&1 || true
-  touch "$cfg" >/dev/null 2>&1 || true
-  if command -v nano >/dev/null 2>&1; then
-    nano "$cfg"
-  elif command -v vi >/dev/null 2>&1; then
-    vi "$cfg"
-  else
-    echo "No editor found. File path: $cfg"
-    pause
-  fi
-}
 
 prosody_collect_user_jids() {
   local f user domain
@@ -3199,6 +3185,23 @@ prosody_collect_user_jids() {
   done
 }
 
+prosody_pct_decode() {
+  local s="$1"
+  printf '%b' "${s//%/\\x}"
+}
+
+prosody_pretty_jid() {
+  local jid="$1"
+  local node domain
+  if [[ "$jid" != *@* ]]; then
+    echo "$jid"
+    return 0
+  fi
+  node="${jid%@*}"
+  domain="${jid#*@}"
+  echo "$(prosody_pct_decode "$node")@$(prosody_pct_decode "$domain")"
+}
+
 PROSODY_SELECTED_JID=""
 prosody_select_user_jid() {
   local prompt="$1"
@@ -3216,7 +3219,7 @@ prosody_select_user_jid() {
   echo "------------------------"
   local i=1
   for item in "${jids[@]}"; do
-    echo "$i. $item"
+    echo "$i. $(prosody_pretty_jid "$item")"
     i=$((i+1))
   done
   echo "------------------------"
@@ -3233,6 +3236,7 @@ prosody_select_user_jid() {
   PROSODY_SELECTED_JID="${jids[$((pick-1))]}"
   return 0
 }
+
 prosody_daily_manage() {
   require_root || return
   while true; do
@@ -3282,15 +3286,19 @@ prosody_daily_manage() {
         ;;
       9)
         if prosody_select_user_jid 'Select user number for password change (0 cancel): '; then
-          prosodyctl passwd "$PROSODY_SELECTED_JID"
+          local jid_pw_decoded
+          jid_pw_decoded="$(prosody_pretty_jid "$PROSODY_SELECTED_JID")"
+          prosodyctl passwd "$jid_pw_decoded"
         fi
         pause
         ;;
       10)
         if prosody_select_user_jid 'Select user number to delete (0 cancel): '; then
-          read_numeric_choice yn "Confirm delete $PROSODY_SELECTED_JID? (1=yes,0=no): "
+          local jid_del_decoded
+          jid_del_decoded="$(prosody_pretty_jid "$PROSODY_SELECTED_JID")"
+          read_numeric_choice yn "Confirm delete $jid_del_decoded? (1=yes,0=no): "
           if [ "$yn" -eq 1 ]; then
-            prosodyctl deluser "$PROSODY_SELECTED_JID"
+            prosodyctl deluser "$jid_del_decoded"
           else
             echo "Cancelled."
           fi
@@ -3755,7 +3763,6 @@ main() {
 }
 
 main "$@"
-
 
 
 
