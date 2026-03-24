@@ -3170,23 +3170,42 @@ prosody_config_lua() {
 }
 
 prosody_collect_user_jids() {
-  local p
-  # Pattern A: /var/lib/prosody/accounts/<domain>/<user>.dat
-  find /var/lib/prosody -type f -path '*/accounts/*/*.dat' 2>/dev/null \
-    | sed -E 's#^.*/accounts/([^/]+)/([^/]+)\.dat$#\2@\1#' \
-    | while read -r p; do [ -n "$p" ] && echo "$p"; done
+  local f user domain
 
-  # Pattern B: /var/lib/prosody/accounts/<user>@<domain>.dat
-  find /var/lib/prosody -type f -path '*/accounts/*.dat' 2>/dev/null \
-    | sed -E 's#^.*/accounts/([^/]+)\.dat$#\1#' \
-    | grep '@' || true
+  find /var/lib/prosody -type f -name '*.dat' 2>/dev/null | while read -r f; do
+    user=""
+    domain=""
+
+    # Pattern A: .../prosody/<domain>/accounts/<user>.dat
+    if [[ "$f" =~ /prosody/([^/]+)/accounts/([^/]+)\.dat$ ]]; then
+      domain="${BASH_REMATCH[1]}"
+      user="${BASH_REMATCH[2]}"
+    # Pattern B: .../accounts/<domain>/<user>.dat
+    elif [[ "$f" =~ /accounts/([^/]+)/([^/]+)\.dat$ ]]; then
+      domain="${BASH_REMATCH[1]}"
+      user="${BASH_REMATCH[2]}"
+    # Pattern C: .../accounts/<user>@<domain>.dat
+    elif [[ "$f" =~ /accounts/([^/]+)\.dat$ ]]; then
+      user="${BASH_REMATCH[1]}"
+    fi
+
+    [ -z "$user" ] && continue
+
+    if [[ "$user" == *@* ]]; then
+      echo "$user"
+    elif [ -n "$domain" ]; then
+      echo "${user}@${domain}"
+    fi
+  done
 }
 
+PROSODY_SELECTED_JID=""
 prosody_select_user_jid() {
   local prompt="$1"
   local pick
   local -a jids
 
+  PROSODY_SELECTED_JID=""
   mapfile -t jids < <(prosody_collect_user_jids | sort -u)
   if [ "${#jids[@]}" -eq 0 ]; then
     echo "No Prosody users found."
@@ -3196,8 +3215,8 @@ prosody_select_user_jid() {
   echo "User list"
   echo "------------------------"
   local i=1
-  for pick in "${jids[@]}"; do
-    echo "$i. $pick"
+  for item in "${jids[@]}"; do
+    echo "$i. $item"
     i=$((i+1))
   done
   echo "------------------------"
@@ -3211,7 +3230,7 @@ prosody_select_user_jid() {
     return 1
   fi
 
-  echo "${jids[$((pick-1))]}"
+  PROSODY_SELECTED_JID="${jids[$((pick-1))]}"
   return 0
 }
 prosody_daily_manage() {
@@ -3262,20 +3281,16 @@ prosody_daily_manage() {
         pause
         ;;
       9)
-        local jid_pw
-        jid_pw="$(prosody_select_user_jid 'Select user number for password change (0 cancel): ')"
-        if [ -n "$jid_pw" ]; then
-          prosodyctl passwd "$jid_pw"
+        if prosody_select_user_jid 'Select user number for password change (0 cancel): '; then
+          prosodyctl passwd "$PROSODY_SELECTED_JID"
         fi
         pause
         ;;
       10)
-        local jid_del
-        jid_del="$(prosody_select_user_jid 'Select user number to delete (0 cancel): ')"
-        if [ -n "$jid_del" ]; then
-          read_numeric_choice yn "Confirm delete $jid_del? (1=yes,0=no): "
+        if prosody_select_user_jid 'Select user number to delete (0 cancel): '; then
+          read_numeric_choice yn "Confirm delete $PROSODY_SELECTED_JID? (1=yes,0=no): "
           if [ "$yn" -eq 1 ]; then
-            prosodyctl deluser "$jid_del"
+            prosodyctl deluser "$PROSODY_SELECTED_JID"
           else
             echo "Cancelled."
           fi
