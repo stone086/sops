@@ -2027,7 +2027,7 @@ bbr_menu() {
 
     echo "TCP Acceleration / Kernel Toolbox (SOPS)"
     echo "------------------------"
-    echo "0. RTM                               9. Switch to kernel-remove mode"
+    echo "9. Switch to kernel-remove mode"
     echo "10. Switch to one-click DD mode      60. Switch to IP quality/media/mail tests"
     echo "------------ Kernel Install ------------"
     echo "1. Install BBR kernel                7. Install Zen kernel"
@@ -2049,11 +2049,13 @@ bbr_menu() {
     echo "61. Print kernel params              62. Edit kernel params"
     echo "------------- Kernel Management -------------"
     echo "51. List kernels                     52. Remove old kernels"
-    echo "25. Reset acceleration               99. Exit"
+    echo "25. Reset acceleration"
     echo "------------------------"
     echo "Info: $(grep '^PRETTY_NAME=' /etc/os-release 2>/dev/null | cut -d= -f2- | tr -d '\"' || echo unknown)  kernel: ${ker}"
     echo "Status: cc=${cc}  qdisc=${qd}"
     echo "Available cc: ${avail}"
+    echo "------------------------"
+    echo -e "${yellow}0. RTM${white}"
     echo "------------------------"
     read_numeric_choice bbr_choice "Please enter number: "
     case "${bbr_choice}" in
@@ -2146,7 +2148,6 @@ EOF
         echo "Custom kernel params applied."
         pause
         ;;
-      99) return ;;
       *) echo "Invalid choice"; pause ;;
     esac
   done
@@ -3023,6 +3024,321 @@ cluster_menu() {
   done
 }
 
+prosody_service_name() {
+  if systemctl list-unit-files 2>/dev/null | grep -q '^prosody\.service'; then
+    echo "prosody"
+  else
+    echo "prosody"
+  fi
+}
+
+prosody_install() {
+  require_root || return
+  show_header
+
+  local domain admin_user admin_pass admin_email svc
+  local cfg_main cfg_domain cert_key cert_crt use_le
+
+  echo "1. Preparation"
+  read -r -p "Domain (e.g. xmpp.example.com): " domain
+  if [ -z "$domain" ]; then
+    echo "Domain cannot be empty."
+    pause
+    return
+  fi
+
+  read -r -p "Admin username (default: admin): " admin_user
+  admin_user="${admin_user:-admin}"
+
+  while true; do
+    read -r -s -p "Admin password: " admin_pass
+    echo
+    [ -n "$admin_pass" ] && break
+    echo "Password cannot be empty."
+  done
+
+  echo "2. Install Prosody"
+  install_package_for_current_pm "prosody" "prosody" "prosody" "prosody" "prosody" "prosody" || true
+  svc="$(prosody_service_name)"
+  systemctl enable --now "$svc" >/dev/null 2>&1 || true
+
+  echo "3. Trusted certificate (Let's Encrypt or CA cert)"
+  echo "Port 80 must be reachable from the public Internet for Let's Encrypt standalone mode."
+  read_numeric_choice use_le "Use Let's Encrypt now? (1=yes,0=no): "
+
+  cert_key=""
+  cert_crt=""
+
+  if [ "$use_le" -eq 1 ]; then
+    install_package_for_current_pm "certbot" "certbot" "certbot" "certbot" "certbot" "certbot" || true
+    read -r -p "Email for Let's Encrypt (optional): " admin_email
+
+    systemctl stop "$svc" >/dev/null 2>&1 || true
+    if [ -n "$admin_email" ]; then
+      certbot certonly --standalone -d "$domain" --non-interactive --agree-tos -m "$admin_email" --keep-until-expiring
+    else
+      certbot certonly --standalone -d "$domain" --non-interactive --agree-tos --register-unsafely-without-email --keep-until-expiring
+    fi
+    systemctl start "$svc" >/dev/null 2>&1 || true
+
+    cert_key="/etc/letsencrypt/live/${domain}/privkey.pem"
+    cert_crt="/etc/letsencrypt/live/${domain}/fullchain.pem"
+  fi
+
+  if [ ! -s "$cert_key" ] || [ ! -s "$cert_crt" ]; then
+    echo "Let's Encrypt not ready. Provide existing trusted CA cert paths."
+    read -r -p "Private key path: " cert_key
+    read -r -p "Full chain cert path: " cert_crt
+  fi
+
+  if [ ! -s "$cert_key" ] || [ ! -s "$cert_crt" ]; then
+    echo "ERROR: Trusted certificate is required. Install aborted."
+    pause
+    return
+  fi
+
+  cfg_main="/etc/prosody/prosody.cfg.lua"
+  cfg_domain="/etc/prosody/conf.d/${domain}.cfg.lua"
+  mkdir -p /etc/prosody/conf.d >/dev/null 2>&1 || true
+
+  cat >"$cfg_domain" <<EOF
+admins = { "${admin_user}@${domain}" }
+
+VirtualHost "${domain}"
+    authentication = "internal_hashed"
+
+    ssl = {
+        key = "${cert_key}";
+        certificate = "${cert_crt}";
+    }
+
+    modules_enabled = {
+        "roster";
+        "saslauth";
+        "tls";
+        "disco";
+        "private";
+        "pep";
+        "vcard4";
+    }
+
+    c2s_require_encryption = false
+EOF
+
+  if [ -f "$cfg_main" ] && ! grep -q 'Include "conf.d/\*.cfg.lua"' "$cfg_main"; then
+    printf '\nInclude "conf.d/*.cfg.lua"\n' >> "$cfg_main"
+  fi
+
+  prosodyctl register "$admin_user" "$domain" "$admin_pass" >/dev/null 2>&1 || true
+
+  echo "4. Go-live checks"
+  if ! prosodyctl check config; then
+    echo "ERROR: config check failed."
+    pause
+    return
+  fi
+
+  systemctl restart "$svc" >/dev/null 2>&1 || true
+  if systemctl is-active --quiet "$svc"; then
+    echo "OK: Prosody is running with trusted certificate."
+  else
+    echo "ERROR: Prosody is not running. Check logs in Daily management."
+    pause
+    return
+  fi
+
+  echo "Configured domain: $domain"
+  echo "Admin user: ${admin_user}@${domain}"
+  echo "Config file: $cfg_domain"
+  echo "Open ports: 5222 (client), 5269 (federation)."
+  pause
+}
+
+prosody_config_lua() {
+  require_root || return
+  local cfg="/etc/prosody/prosody.cfg.lua"
+  mkdir -p /etc/prosody >/dev/null 2>&1 || true
+  touch "$cfg" >/dev/null 2>&1 || true
+  if command -v nano >/dev/null 2>&1; then
+    nano "$cfg"
+  elif command -v vi >/dev/null 2>&1; then
+    vi "$cfg"
+  else
+    echo "No editor found. File path: $cfg"
+    pause
+  fi
+}
+
+prosody_collect_user_jids() {
+  local p
+  # Pattern A: /var/lib/prosody/accounts/<domain>/<user>.dat
+  find /var/lib/prosody -type f -path '*/accounts/*/*.dat' 2>/dev/null \
+    | sed -E 's#^.*/accounts/([^/]+)/([^/]+)\.dat$#\2@\1#' \
+    | while read -r p; do [ -n "$p" ] && echo "$p"; done
+
+  # Pattern B: /var/lib/prosody/accounts/<user>@<domain>.dat
+  find /var/lib/prosody -type f -path '*/accounts/*.dat' 2>/dev/null \
+    | sed -E 's#^.*/accounts/([^/]+)\.dat$#\1#' \
+    | grep '@' || true
+}
+
+prosody_select_user_jid() {
+  local prompt="$1"
+  local pick
+  local -a jids
+
+  mapfile -t jids < <(prosody_collect_user_jids | sort -u)
+  if [ "${#jids[@]}" -eq 0 ]; then
+    echo "No Prosody users found."
+    return 1
+  fi
+
+  echo "User list"
+  echo "------------------------"
+  local i=1
+  for pick in "${jids[@]}"; do
+    echo "$i. $pick"
+    i=$((i+1))
+  done
+  echo "------------------------"
+
+  read_numeric_choice pick "$prompt"
+  if [ "$pick" -eq 0 ]; then
+    return 1
+  fi
+  if [ "$pick" -lt 1 ] || [ "$pick" -gt "${#jids[@]}" ]; then
+    echo "Invalid number."
+    return 1
+  fi
+
+  echo "${jids[$((pick-1))]}"
+  return 0
+}
+prosody_daily_manage() {
+  require_root || return
+  while true; do
+    show_header
+    local svc
+    svc="$(prosody_service_name)"
+    echo "Prosody Daily Management"
+    echo "------------------------"
+    echo "Service: $svc"
+    echo "1. Start service"
+    echo "2. Stop service"
+    echo "3. Restart service"
+    echo "4. Service status"
+    echo "5. View latest log"
+    echo "6. Follow live log"
+    echo "7. Check config"
+    echo "8. Add user"
+    echo "9. Change user password"
+    echo "10. Delete user"
+    echo "11. Renew Let's Encrypt cert"
+    echo "12. Open main config"
+    echo "13. Open domain config"
+    echo "------------------------"
+    echo -e "${yellow}0. RTM${white}"
+    echo "------------------------"
+    read_numeric_choice pmg "Please enter your choice: "
+    case "$pmg" in
+      1) systemctl start "$svc"; echo "Started."; pause ;;
+      2) systemctl stop "$svc"; echo "Stopped."; pause ;;
+      3) systemctl restart "$svc"; echo "Restarted."; pause ;;
+      4) systemctl status "$svc" --no-pager; pause ;;
+      5) journalctl -u "$svc" -n 100 --no-pager; pause ;;
+      6) journalctl -u "$svc" -f ;;
+      7) prosodyctl check config; pause ;;
+      8)
+        local u d p
+        read -r -p "Username: " u
+        read -r -p "Domain: " d
+        read -r -s -p "Password: " p
+        echo
+        if [ -n "$u" ] && [ -n "$d" ] && [ -n "$p" ]; then
+          prosodyctl register "$u" "$d" "$p"
+        else
+          echo "Invalid input."
+        fi
+        pause
+        ;;
+      9)
+        local jid_pw
+        jid_pw="$(prosody_select_user_jid 'Select user number for password change (0 cancel): ')"
+        if [ -n "$jid_pw" ]; then
+          prosodyctl passwd "$jid_pw"
+        fi
+        pause
+        ;;
+      10)
+        local jid_del
+        jid_del="$(prosody_select_user_jid 'Select user number to delete (0 cancel): ')"
+        if [ -n "$jid_del" ]; then
+          read_numeric_choice yn "Confirm delete $jid_del? (1=yes,0=no): "
+          if [ "$yn" -eq 1 ]; then
+            prosodyctl deluser "$jid_del"
+          else
+            echo "Cancelled."
+          fi
+        fi
+        pause
+        ;;
+      11)
+        if command -v certbot >/dev/null 2>&1; then
+          certbot renew
+          systemctl restart "$svc" >/dev/null 2>&1 || true
+        else
+          echo "certbot not found."
+        fi
+        pause
+        ;;
+      12)
+        local cfg_main="/etc/prosody/prosody.cfg.lua"
+        if command -v nano >/dev/null 2>&1; then nano "$cfg_main";
+        elif command -v vi >/dev/null 2>&1; then vi "$cfg_main";
+        else echo "No editor found: $cfg_main"; pause; fi
+        ;;
+      13)
+        local dcfg
+        read -r -p "Domain (e.g. xmpp.example.com): " dcfg
+        local cfg_domain="/etc/prosody/conf.d/${dcfg}.cfg.lua"
+        if [ -z "$dcfg" ]; then
+          echo "Domain cannot be empty."
+          pause
+        elif [ ! -f "$cfg_domain" ]; then
+          echo "Domain config not found: $cfg_domain"
+          pause
+        else
+          if command -v nano >/dev/null 2>&1; then nano "$cfg_domain";
+          elif command -v vi >/dev/null 2>&1; then vi "$cfg_domain";
+          else echo "No editor found: $cfg_domain"; pause; fi
+        fi
+        ;;
+      0) return ;;
+      *) echo "Invalid choice"; pause ;;
+    esac
+  done
+}
+
+prosody_menu() {
+  while true; do
+    show_header
+    echo "Prosody"
+    echo "------------------------"
+    echo "1. Install Prosody"
+    echo "2. Daily management"
+    echo "------------------------"
+    echo -e "${yellow}0. RTM${white}"
+    echo "------------------------"
+    read_numeric_choice pro_choice "Please enter your choice: "
+    case "$pro_choice" in
+      1) prosody_install ;;
+      2) prosody_daily_manage ;;
+      0) return ;;
+      *) echo "Invalid choice"; pause ;;
+    esac
+  done
+}
+
 xmpp_menu() {
   while true; do
     show_header
@@ -3037,13 +3353,288 @@ xmpp_menu() {
     echo "------------------------"
     read_numeric_choice xmpp_choice "Please enter your choice: "
     case "$xmpp_choice" in
-      1|2|3) coming_soon_main ;;
+      1) prosody_menu ;;
+      2) coturn_menu ;;
+      3) coming_soon_main ;;
       0) return ;;
       *) echo "Invalid choice"; pause ;;
     esac
   done
 }
 
+jitsi_install_and_debug() {
+  require_root || return
+  show_header
+
+  local domain email
+  local s_prosody s_jicofo s_jvb s_nginx
+
+  echo "Jitsi Install & Debug"
+  echo "------------------------"
+  read -r -p "Jitsi domain (e.g. meet.example.com): " domain
+  if [ -z "$domain" ]; then
+    echo "Domain cannot be empty."
+    pause
+    return
+  fi
+  read -r -p "Email for Let's Encrypt (optional): " email
+
+  if [ -f /etc/debian_version ]; then
+    install_package_for_current_pm "apt-transport-https" "apt-transport-https" "apt-transport-https" "apt-transport-https" "apt-transport-https" "apt-transport-https" || true
+    install_package_for_current_pm "gnupg" "gnupg" "gnupg" "gnupg" "gnupg" "gnupg" || true
+    install_package_for_current_pm "curl" "curl" "curl" "curl" "curl" "curl" || true
+
+    curl -fsSL https://download.jitsi.org/jitsi-key.gpg.key | gpg --dearmor >/usr/share/keyrings/jitsi-keyring.gpg 2>/dev/null || true
+    cat >/etc/apt/sources.list.d/jitsi-stable.list <<EOF
+
+deb [signed-by=/usr/share/keyrings/jitsi-keyring.gpg] https://download.jitsi.org stable/
+EOF
+    apt-get update -y || true
+
+    DEBIAN_FRONTEND=noninteractive apt-get install -y jitsi-meet || true
+
+    if [ -n "$email" ] && [ -x /usr/share/jitsi-meet/scripts/install-letsencrypt-cert.sh ]; then
+      /usr/share/jitsi-meet/scripts/install-letsencrypt-cert.sh <<EOF
+$email
+EOF
+    fi
+
+    systemctl restart prosody jicofo jitsi-videobridge2 nginx 2>/dev/null || true
+
+    s_prosody="$(systemctl is-active prosody 2>/dev/null || echo unknown)"
+    s_jicofo="$(systemctl is-active jicofo 2>/dev/null || echo unknown)"
+    s_jvb="$(systemctl is-active jitsi-videobridge2 2>/dev/null || echo unknown)"
+    s_nginx="$(systemctl is-active nginx 2>/dev/null || echo unknown)"
+
+    echo "Debug summary"
+    echo "------------------------"
+    echo "prosody: $s_prosody"
+    echo "jicofo: $s_jicofo"
+    echo "jvb: $s_jvb"
+    echo "nginx: $s_nginx"
+    ss -ltnup 2>/dev/null | grep -E ':443 |:10000 ' || true
+    echo "Open URL: https://$domain"
+  else
+    echo "This installer currently targets Debian/Ubuntu family only."
+  fi
+  pause
+}
+
+jitsi_daily_manage() {
+  require_root || return
+  while true; do
+    show_header
+    echo "Jitsi Daily Management"
+    echo "------------------------"
+    echo "1. Restart all Jitsi services"
+    echo "2. Service status overview"
+    echo "3. Show recent logs"
+    echo "4. Follow JVB live log"
+    echo "5. Check listening ports"
+    echo "6. Renew Let's Encrypt cert"
+    echo "------------------------"
+    echo -e "${yellow}0. RTM${white}"
+    echo "------------------------"
+    read_numeric_choice jm "Please enter your choice: "
+    case "$jm" in
+      1) systemctl restart prosody jicofo jitsi-videobridge2 nginx 2>/dev/null || true; echo "Restart done."; pause ;;
+      2)
+        echo "prosody: $(systemctl is-active prosody 2>/dev/null || echo unknown)"
+        echo "jicofo: $(systemctl is-active jicofo 2>/dev/null || echo unknown)"
+        echo "jvb: $(systemctl is-active jitsi-videobridge2 2>/dev/null || echo unknown)"
+        echo "nginx: $(systemctl is-active nginx 2>/dev/null || echo unknown)"
+        pause
+        ;;
+      3)
+        journalctl -u prosody -u jicofo -u jitsi-videobridge2 -u nginx -n 120 --no-pager
+        pause
+        ;;
+      4) journalctl -u jitsi-videobridge2 -f ;;
+      5) ss -ltnup 2>/dev/null | grep -E ':80 |:443 |:10000 |:3478 |:5349 ' || true; pause ;;
+      6)
+        if command -v certbot >/dev/null 2>&1; then
+          certbot renew
+          systemctl restart nginx prosody jicofo jitsi-videobridge2 2>/dev/null || true
+        else
+          echo "certbot not found."
+        fi
+        pause
+        ;;
+      0) return ;;
+      *) echo "Invalid choice"; pause ;;
+    esac
+  done
+}
+
+jitsi_menu() {
+  while true; do
+    show_header
+    echo "Jitsi"
+    echo "------------------------"
+    echo "1. Install and debug Jitsi"
+    echo "2. Daily management"
+    echo "------------------------"
+    echo -e "${yellow}0. RTM${white}"
+    echo "------------------------"
+    read_numeric_choice jitsi_choice "Please enter your choice: "
+    case "$jitsi_choice" in
+      1) jitsi_install_and_debug ;;
+      2) jitsi_daily_manage ;;
+      0) return ;;
+      *) echo "Invalid choice"; pause ;;
+    esac
+  done
+}
+
+coturn_install_and_debug() {
+  require_root || return
+  show_header
+
+  local turn_domain turn_user turn_pass link_jitsi jitsi_domain
+  local cfg="/etc/turnserver.conf"
+
+  echo "Coturn Install & Debug"
+  echo "------------------------"
+  read -r -p "TURN domain/IP (e.g. turn.example.com): " turn_domain
+  if [ -z "$turn_domain" ]; then
+    echo "TURN domain/IP cannot be empty."
+    pause
+    return
+  fi
+
+  read -r -p "TURN username (default: turnuser): " turn_user
+  turn_user="${turn_user:-turnuser}"
+
+  while true; do
+    read -r -s -p "TURN password: " turn_pass
+    echo
+    [ -n "$turn_pass" ] && break
+    echo "Password cannot be empty."
+  done
+
+  install_package_for_current_pm "coturn" "coturn" "coturn" "coturn" "coturn" "coturn" || true
+
+  if [ -f /etc/default/coturn ]; then
+    sed -i 's/^#\?TURNSERVER_ENABLED=.*/TURNSERVER_ENABLED=1/' /etc/default/coturn
+  fi
+
+  cat >"$cfg" <<EOF
+listening-port=3478
+tls-listening-port=5349
+listening-ip=0.0.0.0
+fingerprint
+use-auth-secret
+static-auth-secret=$(openssl rand -hex 16)
+realm=${turn_domain}
+total-quota=100
+stale-nonce=600
+no-multicast-peers
+no-loopback-peers
+cert=/etc/ssl/certs/ssl-cert-snakeoil.pem
+pkey=/etc/ssl/private/ssl-cert-snakeoil.key
+log-file=/var/log/turnserver.log
+simple-log
+EOF
+
+  # add static user as fallback
+  echo "user=${turn_user}:${turn_pass}" >> "$cfg"
+
+  systemctl enable --now coturn >/dev/null 2>&1 || true
+  systemctl restart coturn >/dev/null 2>&1 || true
+
+  echo "Debug summary"
+  echo "------------------------"
+  echo "coturn: $(systemctl is-active coturn 2>/dev/null || echo unknown)"
+  ss -ltnup 2>/dev/null | grep -E ':3478 |:5349 ' || true
+
+  read_numeric_choice link_jitsi "Configure quick Jitsi linkage now? (1=yes,0=no): "
+  if [ "$link_jitsi" -eq 1 ]; then
+    read -r -p "Jitsi domain (e.g. meet.example.com): " jitsi_domain
+    local jitsi_cfg="/etc/jitsi/meet/${jitsi_domain}-config.js"
+    if [ -f "$jitsi_cfg" ]; then
+      if ! grep -q 'SOPS_COTURN_LINK_BEGIN' "$jitsi_cfg"; then
+        cat >>"$jitsi_cfg" <<EOF
+
+// SOPS_COTURN_LINK_BEGIN
+if (typeof config !== 'undefined') {
+  config.p2p = config.p2p || {};
+  config.p2p.useStunTurn = true;
+  config.p2p.stunServers = [
+    { urls: 'stun:${turn_domain}:3478' },
+    { urls: 'turn:${turn_domain}:3478?transport=udp', username: '${turn_user}', credential: '${turn_pass}' }
+  ];
+}
+// SOPS_COTURN_LINK_END
+EOF
+      fi
+      systemctl restart nginx 2>/dev/null || true
+      echo "Jitsi linkage snippet added: $jitsi_cfg"
+    else
+      echo "Jitsi config not found: $jitsi_cfg"
+      echo "You can link later from daily management by editing config manually."
+    fi
+  fi
+
+  pause
+}
+
+coturn_daily_manage() {
+  require_root || return
+  while true; do
+    show_header
+    echo "Coturn Daily Management"
+    echo "------------------------"
+    echo "1. Start service"
+    echo "2. Stop service"
+    echo "3. Restart service"
+    echo "4. Service status"
+    echo "5. View latest log"
+    echo "6. Follow live log"
+    echo "7. Check listening ports"
+    echo "8. Open turnserver config"
+    echo "------------------------"
+    echo -e "${yellow}0. RTM${white}"
+    echo "------------------------"
+    read_numeric_choice ct "Please enter your choice: "
+    case "$ct" in
+      1) systemctl start coturn; echo "Started."; pause ;;
+      2) systemctl stop coturn; echo "Stopped."; pause ;;
+      3) systemctl restart coturn; echo "Restarted."; pause ;;
+      4) systemctl status coturn --no-pager; pause ;;
+      5) journalctl -u coturn -n 120 --no-pager; pause ;;
+      6) journalctl -u coturn -f ;;
+      7) ss -ltnup 2>/dev/null | grep -E ':3478 |:5349 ' || true; pause ;;
+      8)
+        local cfg="/etc/turnserver.conf"
+        if command -v nano >/dev/null 2>&1; then nano "$cfg";
+        elif command -v vi >/dev/null 2>&1; then vi "$cfg";
+        else echo "No editor found: $cfg"; pause; fi
+        ;;
+      0) return ;;
+      *) echo "Invalid choice"; pause ;;
+    esac
+  done
+}
+
+coturn_menu() {
+  while true; do
+    show_header
+    echo "Coturn"
+    echo "------------------------"
+    echo "1. Install and debug Coturn"
+    echo "2. Daily management"
+    echo "------------------------"
+    echo -e "${yellow}0. RTM${white}"
+    echo "------------------------"
+    read_numeric_choice coturn_choice "Please enter your choice: "
+    case "$coturn_choice" in
+      1) coturn_install_and_debug ;;
+      2) coturn_daily_manage ;;
+      0) return ;;
+      *) echo "Invalid choice"; pause ;;
+    esac
+  done
+}
 webrtc_menu() {
   while true; do
     show_header
@@ -3057,7 +3648,9 @@ webrtc_menu() {
     echo "------------------------"
     read_numeric_choice rtc_choice "Please enter your choice: "
     case "$rtc_choice" in
-      1|2|3) coming_soon_main ;;
+      1) jitsi_menu ;;
+      2) coturn_menu ;;
+      3) coming_soon_main ;;
       0) return ;;
       *) echo "Invalid choice"; pause ;;
     esac
@@ -3147,3 +3740,13 @@ main() {
 }
 
 main "$@"
+
+
+
+
+
+
+
+
+
+
